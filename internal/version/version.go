@@ -15,7 +15,7 @@ var (
 	// versionPrerelease is a pre-release marker for the version. If this is ""
 	// (empty string) then it means that it is a final release. Otherwise, this
 	// is a pre-release such as "dev" (in development), "beta.1", "rc1.1", etc.
-	versionPrerelease = "alpha.1"
+	versionPrerelease = "dev"
 )
 
 // Get constructs and returns the Smuggle version identifier which will include
