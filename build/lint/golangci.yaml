@@ -1,0 +1,25 @@
+version: "2"
+linters:
+  enable:
+    - errcheck
+    - gocritic
+    - govet
+    - ineffassign
+    - misspell
+    - perfsprint
+    - staticcheck
+    - unused
+  settings:
+    tagalign:
+      align: true
+      sort: true
+      order:
+        - hcl
+        - json
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/rasorp/smuggle

@@ -1,0 +1,65 @@
+name: Golang - Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  invoke-lint:
+    name: "Invoke Lint"
+    uses: ./.github/workflows/golang-lint.yaml
+  invoke-test:
+    name: "Invoke Test"
+    uses: ./.github/workflows/golang-test.yaml
+  invoke-compile:
+    name: "Invoke Compile"
+    uses: ./.github/workflows/golang-compile.yaml
+  release:
+    name: "Create Release"
+    runs-on: ubuntu-24.04
+    needs: [invoke-lint, invoke-test, invoke-compile]
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: artifacts
+      - name: "Identify Version"
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_no_v=${VERSION#v}" >> "$GITHUB_OUTPUT"
+      - name: "Create archives"
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p release
+
+          # Create amd64 archive
+          cd artifacts/smuggle_linux-amd64
+          chmod +x smuggle
+          tar -czf ../../release/smuggle_${VERSION}_linux_amd64.tar.gz smuggle
+          cd ../..
+
+          # Create arm64 archive
+          cd artifacts/smuggle_linux-arm64
+          chmod +x smuggle
+          tar -czf ../../release/smuggle_${VERSION}_linux_arm64.tar.gz smuggle
+          cd ../..
+      - name: "Create checksums"
+        run: |
+          cd release
+          sha256sum -- *.tar.gz > checksums.txt
+          cat checksums.txt
+      - uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          prerelease: ${{ contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'rc') }}
+          files: |
+            release/smuggle_${{ steps.version.outputs.version }}_linux_amd64.tar.gz
+            release/smuggle_${{ steps.version.outputs.version }}_linux_arm64.tar.gz
+            release/checksums.txt

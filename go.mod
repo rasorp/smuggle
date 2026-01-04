@@ -1,0 +1,41 @@
+module github.com/rasorp/smuggle
+
+go 1.24.6
+
+require (
+	github.com/containernetworking/plugins v1.8.0
+	github.com/coreos/go-iptables v0.8.0
+	github.com/go-chi/chi/v5 v5.2.3
+	github.com/google/uuid v1.6.0
+	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/hashicorp/nomad/api v0.0.0-20251205094914-d4aba5faf1a5
+	github.com/ryanuber/columnize v2.1.2+incompatible
+	github.com/sethvargo/go-retry v0.3.0
+	github.com/shoenig/test v1.12.2
+	github.com/urfave/cli/v3 v3.6.1
+	github.com/vishvananda/netlink v1.3.1
+	go.uber.org/zap v1.27.1
+)
+
+require (
+	github.com/agext/levenshtein v1.2.1 // indirect
+	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/hashicorp/cronexpr v1.1.3 // indirect
+	github.com/hashicorp/errwrap v1.0.0 // indirect
+	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/hashicorp/go-rootcerts v1.0.2 // indirect
+	github.com/mitchellh/go-homedir v1.1.0 // indirect
+	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
+	github.com/mitchellh/mapstructure v1.5.0 // indirect
+	github.com/vishvananda/netns v0.0.5 // indirect
+	github.com/zclconf/go-cty v1.16.3 // indirect
+	go.uber.org/multierr v1.10.0 // indirect
+	golang.org/x/mod v0.27.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/tools v0.36.0 // indirect
+)

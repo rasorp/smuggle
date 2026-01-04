@@ -1,0 +1,28 @@
+name: Golang - Lint
+
+on:
+  # The release workflow will call this workflow to lint the source code before
+  # compilation, so we need to allow workflow triggers.
+  workflow_call:
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - ".github/workflows/**"
+      - ".gitignore"
+      - "docs/**"
+      - "README.md"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: "build/.go-version"
+      - name: "Run lint"
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        with:
+          version: v2.1.6
+          args: --config=./build/lint/golangci.yaml

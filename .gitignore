@@ -1,0 +1,18 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.swp
+*.dylib
+
+# Binary output directory
+*bin/
+
+# Example files that are generated.
+smuggle-net.json
+
+# Editor directories
+.idea/
+.vscode/
+.zed/

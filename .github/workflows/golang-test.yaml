@@ -1,0 +1,29 @@
+name: Golang - Test
+
+on:
+  # The release workflow will call this workflow to test the source code before
+  # compilation, so we need to allow workflow triggers.
+  workflow_call:
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - ".github/workflows/**"
+      - ".gitignore"
+      - "docs/**"
+      - "README.md"
+
+jobs:
+  test:
+    runs-on: "ubuntu-24.04"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: "build/.go-version"
+      - name: "Run gotestsum install"
+        run: |
+          go install gotest.tools/gotestsum@v1.13.0
+      - name: "Run test"
+        run: |
+          make test

@@ -1,0 +1,37 @@
+name: Golang - Compile
+
+on:
+  # The release workflow will call this workflow to build the binaries, so we
+  # need to allow workflow triggers.
+  workflow_call:
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - ".github/workflows/**"
+      - ".gitignore"
+      - "docs/**"
+      - "README.md"
+
+jobs:
+  compile:
+    strategy:
+      matrix:
+        goos: ["linux"]
+        goarch: ["amd64", "arm64"]
+    runs-on: "ubuntu-24.04"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: "build/.go-version"
+      - name: "Run compile"
+        run: |
+          make "bin/${{ matrix.goos }}_${{ matrix.goarch }}/smuggle"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: smuggle_${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/${{ matrix.goos }}_${{ matrix.goarch }}/smuggle
+          retention-days: 1
