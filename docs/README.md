@@ -11,6 +11,7 @@ API, and configuration options.
   - [Network](./config_network.md)
   - [Network Provider VXLAN](./config_network_vxlan.md)
 - [API](./api.md)
+- [Troubleshooting](./troubleshooting.md)
 
 ## Known Issues
 * Ubuntu 22.04 and later has a known issue within the netlink library tracked as
