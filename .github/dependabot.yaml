@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "08:00"
+    labels:
+      - "area/dependency/go"
