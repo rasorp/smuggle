@@ -3,7 +3,7 @@ module github.com/rasorp/smuggle
 go 1.24.6
 
 require (
-	github.com/containernetworking/plugins v1.8.0
+	github.com/containernetworking/plugins v1.9.0
 	github.com/coreos/go-iptables v0.8.0
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/google/uuid v1.6.0
