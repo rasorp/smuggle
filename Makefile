@@ -34,6 +34,12 @@ build: ## Build a development version of Smuggle
 		cmd/cmd.go
 	@echo "==> Done"
 
+.PHONY: docker-build
+docker-build: ## Build a Docker image for Smuggle
+	@echo "==> Building Smuggle Docker image..."
+	@docker build -f build/Docker/Dockerfile .
+	@echo "==> Done"
+
 .PHONY: lint
 lint: ## Run linters against the Smuggle codebase
 	@echo "==> Linting Smuggle..."
