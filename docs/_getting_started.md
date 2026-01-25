@@ -1,6 +1,6 @@
 # Getting Started
-To get started with Nomad Pipeline you need a Nomad cluster up and running. If
-you don't have one yet, you can follow the
+To get started with Smuggle you need a Nomad cluster up and running. If you
+don't have one yet, you can follow the
 [Nomad Getting Started Guide](https://www.nomadproject.io/intro/getting-started/install)
 to set up a local development cluster.
 
