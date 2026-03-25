@@ -20,4 +20,3 @@ COPY bin/${TARGETOS}_${TARGETARCH}/smuggle /usr/local/bin/smuggle
 USER root
 
 ENTRYPOINT ["/usr/local/bin/smuggle"]
-CMD ["agent", "--help"]
