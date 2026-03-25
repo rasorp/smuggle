@@ -35,9 +35,9 @@ build: ## Build a development version of Smuggle
 	@echo "==> Done"
 
 .PHONY: docker-build
-docker-build: ## Build a Docker image for Smuggle
+docker-build: ## Build a Docker multi-arch image for Smuggle
 	@echo "==> Building Smuggle Docker image..."
-	@docker build -f build/Docker/Dockerfile .
+	@docker buildx build --platform linux/amd64,linux/arm64 -f build/docker/Dockerfile .
 	@echo "==> Done"
 
 .PHONY: lint
