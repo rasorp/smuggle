@@ -11,7 +11,7 @@ require (
 	github.com/hashicorp/nomad/api v0.0.0-20251205094914-d4aba5faf1a5
 	github.com/ryanuber/columnize v2.1.2+incompatible
 	github.com/sethvargo/go-retry v0.3.0
-	github.com/shoenig/test v1.12.2
+	github.com/shoenig/test v1.13.0
 	github.com/urfave/cli/v3 v3.8.0
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/zap v1.27.1
