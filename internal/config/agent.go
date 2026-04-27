@@ -107,7 +107,7 @@ func AgentConfigFromCommand(cmd *cli.Command) *AgentConfig {
 func AgentConfigFromFiles(cmd *cli.Command) (*AgentConfig, error) {
 	var cfg *AgentConfig
 
-	for _, file := range cmd.StringArgs("config") {
+	for _, file := range cmd.StringSlice("config") {
 		fileCfg, err := parseAgentConfgigFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse config file %q: %w", file, err)

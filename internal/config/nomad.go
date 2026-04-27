@@ -19,14 +19,14 @@ const (
 )
 
 type NomadConfig struct {
-	Address       string `hcl:"address" json:"address"`
-	Token         string `hcl:"token" json:"token"`
-	CACert        string `hcl:"ca_cert" json:"ca_cert"`
-	CAPath        string `hcl:"ca_path" json:"ca_path"`
-	ClientCert    string `hcl:"client_cert" json:"client_cert"`
-	ClientKey     string `hcl:"client_key" json:"client_key"`
-	TLSServerName string `hcl:"tls_server_name" json:"tls_server_name"`
-	SkipVerify    *bool  `hcl:"skip_verify" json:"skip_verify"`
+	Address       string `hcl:"address,optional" json:"address"`
+	Token         string `hcl:"token,optional" json:"token"`
+	CACert        string `hcl:"ca_cert,optional" json:"ca_cert"`
+	CAPath        string `hcl:"ca_path,optional" json:"ca_path"`
+	ClientCert    string `hcl:"client_cert,optional" json:"client_cert"`
+	ClientKey     string `hcl:"client_key,optional" json:"client_key"`
+	TLSServerName string `hcl:"tls_server_name,optional" json:"tls_server_name"`
+	SkipVerify    *bool  `hcl:"skip_verify,optional" json:"skip_verify"`
 }
 
 func DefaultNomadConfig() *NomadConfig {
