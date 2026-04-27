@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"testing"
@@ -348,6 +349,190 @@ func Test_AgentConfigFromCommand(t *testing.T) {
 			cmdApp := &cli.Command{Flags: AgentConfigCommandFlags()}
 			tc.setFlags(cmdApp)
 			must.Eq(t, tc.expected, AgentConfigFromCommand(cmdApp))
+		})
+	}
+}
+
+func Test_AgentConfigFromFiles(t *testing.T) {
+	testCases := []struct {
+		name  string
+		files []struct {
+			content string
+			ext     string
+		}
+		expected    *AgentConfig
+		expectError bool
+	}{
+		{
+			name:        "no config files",
+			files:       nil,
+			expected:    nil,
+			expectError: false,
+		},
+		{
+			name: "single HCL file",
+			files: []struct {
+				content string
+				ext     string
+			}{
+				{
+					content: `
+server {
+  enabled = true
+}`,
+					ext: "hcl",
+				},
+			},
+			expected: &AgentConfig{
+				Server: &ServerConfig{
+					Enabled: helper.PointerOf(true),
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "single JSON file",
+			files: []struct {
+				content string
+				ext     string
+			}{
+				{
+					content: `
+{
+  "server": {
+    "enabled": true
+  }
+}`,
+					ext: "json",
+				},
+			},
+			expected: &AgentConfig{
+				Server: &ServerConfig{
+					Enabled: helper.PointerOf(true),
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "multiple files merged with later overriding earlier",
+			files: []struct {
+				content string
+				ext     string
+			}{
+				{
+					content: `
+log {
+  level = "info"
+  json  = false
+}
+
+server {
+  enabled = true
+}`,
+					ext: "hcl",
+				},
+				{
+					content: `
+{
+  "log": {
+    "level": "debug"
+  }
+}`,
+					ext: "json",
+				},
+			},
+			expected: &AgentConfig{
+				Log: &LogConfig{
+					Level: "debug",
+					JSON:  helper.PointerOf(false),
+				},
+				Server: &ServerConfig{
+					Enabled: helper.PointerOf(true),
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "non-existent file returns error",
+			files: []struct {
+				content string
+				ext     string
+			}{
+				{
+					content: "",
+					ext:     "nonexistent",
+				},
+			},
+			expected:    nil,
+			expectError: true,
+		},
+		{
+			name: "invalid HCL content returns error",
+			files: []struct {
+				content string
+				ext     string
+			}{
+				{
+					content: `
+client {
+  disable_ipmasq = "not-a-bool"
+}`,
+					ext: "hcl",
+				},
+			},
+			expected:    nil,
+			expectError: true,
+		},
+		{
+			name: "invalid JSON content returns error",
+			files: []struct {
+				content string
+				ext     string
+			}{
+				{
+					content: `{
+  "client": {
+    "disable_ipmasq": "not-a-bool"
+  }
+}`,
+					ext: "json",
+				},
+			},
+			expected:    nil,
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmdApp := &cli.Command{Flags: AgentConfigCommandFlags()}
+
+			for i, f := range tc.files {
+				if f.content == "" && f.ext == "nonexistent" {
+					must.NoError(t, cmdApp.Set("config", "/tmp/does-not-exist-smuggle-test.hcl"))
+					continue
+				}
+
+				tmpFile, err := os.CreateTemp(t.TempDir(), fmt.Sprintf("config-%d-*.%s", i, f.ext))
+				must.NoError(t, err)
+				t.Cleanup(func() { _ = os.Remove(tmpFile.Name()) })
+
+				_, err = tmpFile.WriteString(f.content)
+				must.NoError(t, err)
+				must.NoError(t, tmpFile.Close())
+
+				must.NoError(t, cmdApp.Set("config", tmpFile.Name()))
+			}
+
+			result, err := AgentConfigFromFiles(cmdApp)
+
+			if tc.expectError {
+				must.Error(t, err)
+				must.Nil(t, result)
+			} else {
+				must.NoError(t, err)
+				must.Eq(t, tc.expected, result)
+			}
 		})
 	}
 }

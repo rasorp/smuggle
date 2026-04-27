@@ -27,7 +27,7 @@ func runCommand() *cli.Command {
 			if err != nil {
 				return err
 			}
-			defaultCfg.Merge(fileCfg)
+			defaultCfg = defaultCfg.Merge(fileCfg)
 
 			// Merge in any configuration provided via command line flags which
 			// will override any previous configuration settings.
