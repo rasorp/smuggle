@@ -34,7 +34,8 @@ type NetworkProviderSetResp struct {
 
 // NetworkProviderDeleteRemoteReq contains parameters for deleting a remote subnet.
 type NetworkProviderDeleteRemoteReq struct {
-	Subnet *Subnet
+	Subnet       *Subnet
+	LocalSubnets []*Subnet // local subnets on this host, used for tearing down policy routing rules
 }
 
 // NetworkProviderDeleteRemoteResp is returned after deleting a remote subnet.
@@ -42,7 +43,8 @@ type NetworkProviderDeleteRemoteResp struct{}
 
 // NetworkProviderSetRemoteReq contains parameters for setting up a remote subnet.
 type NetworkProviderSetRemoteReq struct {
-	Subnet *Subnet
+	Subnet       *Subnet
+	LocalSubnets []*Subnet // local subnets on this host, used for policy routing rules
 }
 
 // NetworkProviderSetRemoteResp is returned after setting up a remote subnet.

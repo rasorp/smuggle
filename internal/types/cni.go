@@ -26,7 +26,7 @@ func GenerateCNIConfig(network *Network, subnet *Subnet) *CNIConfig {
 		Name:   network.Name,
 		Bridge: network.Name + "brd0",
 		MTU:    subnet.MTU,
-		IPMasq: !*network.IPMasq,
+		IPMasq: *network.IPMasq,
 		IPv4: &IPv4CNIConfig{
 			Network: network.IPv4.Network.String(),
 			Subnet:  subnet.IPv4Network.NextAddr().String(),
