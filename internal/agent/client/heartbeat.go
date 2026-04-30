@@ -38,7 +38,7 @@ func (c *Client) startSubnetHeartbeat(cfg *types.Subnet) {
 			cfgCopy := cfg.Copy()
 			cfgCopy.Expiration = time.Now().Add(types.DefaultSubnetTTL)
 
-			_, err := c.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: cfg})
+			_, err := c.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: cfgCopy})
 
 			// Adjust the ticker interval based on success or failure. On
 			// success, we maintain the regular interval. On failure, we shorten
@@ -53,7 +53,7 @@ func (c *Client) startSubnetHeartbeat(cfg *types.Subnet) {
 
 				c.logger.Debug("updated subnet expiration",
 					zap.String("network", cfg.NetworkName),
-					zap.Time("new_expiration", cfg.Expiration),
+					zap.Time("expiration", cfgCopy.Expiration),
 				)
 			default:
 				ticker.Reset(10 * time.Second)
