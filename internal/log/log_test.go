@@ -1,6 +1,9 @@
 package log
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/shoenig/test/must"
@@ -94,6 +97,20 @@ func TestNew(t *testing.T) {
 				must.True(t, core.Enabled(zapcore.ErrorLevel))
 				must.False(t, core.Enabled(zapcore.WarnLevel))
 				must.False(t, core.Enabled(zapcore.InfoLevel))
+			},
+		},
+		{
+			name: "file logging enabled",
+			cfg: &config.LogConfig{
+				Level:            "info",
+				File:             filepath.Join(t.TempDir(), "smuggle.log"),
+				JSON:             helper.PointerOf(false),
+				IncludeLine:      helper.PointerOf(false),
+				EnableStacktrace: helper.PointerOf(false),
+			},
+			expectError: false,
+			validate: func(t *testing.T, logger *Logger) {
+				must.NotNil(t, logger)
 			},
 		},
 		{
@@ -203,4 +220,51 @@ func TestNew(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNew_fileLogging(t *testing.T) {
+	const logMsg = "test file and stdout log entry"
+
+	logFile := filepath.Join(t.TempDir(), "smuggle.log")
+
+	cfg := &config.LogConfig{
+		Level:            "info",
+		File:             logFile,
+		JSON:             helper.PointerOf(false),
+		IncludeLine:      helper.PointerOf(false),
+		EnableStacktrace: helper.PointerOf(false),
+	}
+
+	// Redirect os.Stdout to a pipe before calling New so that the
+	// WriteSyncer inside the logger captures the pipe end, not the
+	// original terminal.
+	r, w, err := os.Pipe()
+	must.NoError(t, err)
+
+	origStdout := os.Stdout
+	os.Stdout = w
+
+	logger, err := New(cfg)
+	must.NoError(t, err)
+	must.NotNil(t, logger)
+
+	logger.Info(logMsg)
+	_ = logger.Sync()
+
+	// Restore stdout and close the write end so the reader reaches EOF.
+	os.Stdout = origStdout
+	must.NoError(t, w.Close())
+
+	// Drain the pipe into a buffer.
+	var stdoutBuf bytes.Buffer
+	_, err = stdoutBuf.ReadFrom(r)
+	must.NoError(t, err)
+
+	// Verify the message reached stdout.
+	must.StrContains(t, stdoutBuf.String(), logMsg)
+
+	// Verify the message was also written to the log file on disk.
+	fileContent, err := os.ReadFile(logFile)
+	must.NoError(t, err)
+	must.StrContains(t, string(fileContent), logMsg)
 }

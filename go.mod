@@ -15,9 +15,11 @@ require (
 	github.com/urfave/cli/v3 v3.8.0
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/zap v1.27.1
+	gopkg.in/lumberjack.v2 v2.0.0
 )
 
 require (
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -38,4 +40,6 @@ require (
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/tools v0.36.0 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
