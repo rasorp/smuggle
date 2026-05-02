@@ -14,6 +14,7 @@ func Test_DefaultLogConfig(t *testing.T) {
 
 	must.NotNil(t, cfg)
 	must.Eq(t, "info", cfg.Level)
+	must.Eq(t, "", cfg.File)
 	must.False(t, *cfg.JSON)
 	must.False(t, *cfg.IncludeLine)
 	must.False(t, *cfg.EnableStacktrace)
@@ -48,18 +49,21 @@ func TestLogConfig_Merge(t *testing.T) {
 			name: "both set",
 			base: &LogConfig{
 				Level:            "debug",
+				File:             "/var/log/smuggle-base.log",
 				JSON:             helper.PointerOf(true),
 				IncludeLine:      helper.PointerOf(true),
 				EnableStacktrace: helper.PointerOf(true),
 			},
 			other: &LogConfig{
 				Level:            "warn",
+				File:             "/var/log/smuggle-other.log",
 				JSON:             helper.PointerOf(false),
 				IncludeLine:      helper.PointerOf(false),
 				EnableStacktrace: helper.PointerOf(false),
 			},
 			expected: &LogConfig{
 				Level:            "warn",
+				File:             "/var/log/smuggle-other.log",
 				JSON:             helper.PointerOf(false),
 				IncludeLine:      helper.PointerOf(false),
 				EnableStacktrace: helper.PointerOf(false),
@@ -69,6 +73,7 @@ func TestLogConfig_Merge(t *testing.T) {
 			name: "partial override",
 			base: &LogConfig{
 				Level:            "debug",
+				File:             "/var/log/smuggle.log",
 				JSON:             helper.PointerOf(true),
 				IncludeLine:      helper.PointerOf(true),
 				EnableStacktrace: helper.PointerOf(true),
@@ -78,9 +83,38 @@ func TestLogConfig_Merge(t *testing.T) {
 			},
 			expected: &LogConfig{
 				Level:            "error",
+				File:             "/var/log/smuggle.log",
 				JSON:             helper.PointerOf(true),
 				IncludeLine:      helper.PointerOf(true),
 				EnableStacktrace: helper.PointerOf(true),
+			},
+		},
+		{
+			name: "file override",
+			base: &LogConfig{
+				Level: "info",
+				File:  "/var/log/smuggle-base.log",
+			},
+			other: &LogConfig{
+				File: "/var/log/smuggle-override.log",
+			},
+			expected: &LogConfig{
+				Level: "info",
+				File:  "/var/log/smuggle-override.log",
+			},
+		},
+		{
+			name: "file not overridden when other file empty",
+			base: &LogConfig{
+				Level: "info",
+				File:  "/var/log/smuggle.log",
+			},
+			other: &LogConfig{
+				Level: "warn",
+			},
+			expected: &LogConfig{
+				Level: "warn",
+				File:  "/var/log/smuggle.log",
 			},
 		},
 	}
@@ -135,6 +169,22 @@ func TestLogConfig_Validate(t *testing.T) {
 			},
 			expectedError: true,
 		},
+		{
+			name: "valid absolute log file path",
+			config: &LogConfig{
+				Level: "info",
+				File:  "/var/log/smuggle.log",
+			},
+			expectedError: false,
+		},
+		{
+			name: "invalid relative log file path",
+			config: &LogConfig{
+				Level: "info",
+				File:  "relative/smuggle.log",
+			},
+			expectedError: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -156,6 +206,12 @@ func Test_LogConfigCommandFlags(t *testing.T) {
 			Name:        logLevalFlag,
 			Usage:       "The threshold level for logging",
 			Sources:     cli.EnvVars("SMUGGLE_LOG_LEVEL"),
+		},
+		&cli.StringFlag{
+			HideDefault: true,
+			Name:        logFileFlag,
+			Usage:       "The file to write logs to",
+			Sources:     cli.EnvVars("SMUGGLE_LOG_FILE"),
 		},
 		&cli.BoolFlag{
 			HideDefault: true,
@@ -194,12 +250,14 @@ func Test_LogConfigFromCommand(t *testing.T) {
 			name: "all flags set",
 			setFlags: func(cmd *cli.Command) {
 				must.NoError(t, cmd.Set(logLevalFlag, "debug"))
+				must.NoError(t, cmd.Set(logFileFlag, "/var/log/smuggle.log"))
 				must.NoError(t, cmd.Set(logJSONFlag, "true"))
 				must.NoError(t, cmd.Set(logIncludeLineFlag, "true"))
 				must.NoError(t, cmd.Set(logEnableStacktraceFlag, "true"))
 			},
 			expected: &LogConfig{
 				Level:            "debug",
+				File:             "/var/log/smuggle.log",
 				JSON:             helper.PointerOf(true),
 				IncludeLine:      helper.PointerOf(true),
 				EnableStacktrace: helper.PointerOf(true),
@@ -214,6 +272,15 @@ func Test_LogConfigFromCommand(t *testing.T) {
 			expected: &LogConfig{
 				Level: "warn",
 				JSON:  helper.PointerOf(true),
+			},
+		},
+		{
+			name: "only file flag set",
+			setFlags: func(cmd *cli.Command) {
+				must.NoError(t, cmd.Set(logFileFlag, "/var/log/smuggle.log"))
+			},
+			expected: &LogConfig{
+				File: "/var/log/smuggle.log",
 			},
 		},
 	}

@@ -170,6 +170,7 @@ Configure the agent log output format and verbosity.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `level` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `file` | string | `""` | Absolute path to a file to write logs to; logs are also always written to stdout. The file is rotated at 100MB, with 5 backups kept for 30 days |
 | `json` | bool | `false` | Output logs in JSON format |
 | `include_line` | bool | `false` | Include file and line numbers in logs |
 | `enable_stacktrace` | bool | `false` | Include stack traces for errors |
@@ -177,6 +178,7 @@ Configure the agent log output format and verbosity.
 ### Command-Line Flags
 ```bash
 --log-level=debug
+--log-file=/var/log/smuggle/agent.log
 --log-json
 --log-include-line
 --log-enable-stacktrace
@@ -185,6 +187,7 @@ Configure the agent log output format and verbosity.
 ### Environment Variables
 ```bash
 SMUGGLE_LOG_LEVEL=debug
+SMUGGLE_LOG_FILE=/var/log/smuggle/agent.log
 SMUGGLE_LOG_JSON=true
 SMUGGLE_LOG_INCLUDE_LINE=true
 SMUGGLE_LOG_ENABLE_STACKTRACE=true
@@ -195,6 +198,7 @@ SMUGGLE_LOG_ENABLE_STACKTRACE=true
 ```hcl
 log {
   level             = "debug"
+  file              = "/var/log/smuggle/agent.log"
   json              = false
   include_line      = true
   enable_stacktrace = false
@@ -206,6 +210,7 @@ log {
 {
   "log": {
     "level": "debug",
+    "file": "/var/log/smuggle/agent.log",
     "json": false,
     "include_line": true,
     "enable_stacktrace": false

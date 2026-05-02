@@ -1,8 +1,11 @@
 package log
 
 import (
+	"os"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/lumberjack.v2"
 
 	"github.com/rasorp/smuggle/internal/config"
 )
@@ -29,22 +32,45 @@ func New(cfg *config.LogConfig) (*Logger, error) {
 		return nil, err
 	}
 
-	enc := "console"
-	ts := zapcore.ISO8601TimeEncoder
+	var encoder zapcore.Encoder
+
+	encCfg := zap.NewProductionEncoderConfig()
+	encCfg.NameKey = "component"
+	encCfg.TimeKey = "timestamp"
 
 	if *cfg.JSON {
-		enc = "json"
-		ts = zapcore.RFC3339NanoTimeEncoder
+		encCfg.EncodeTime = zapcore.RFC3339NanoTimeEncoder
+		encoder = zapcore.NewJSONEncoder(encCfg)
+	} else {
+		encCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+		encoder = zapcore.NewConsoleEncoder(encCfg)
 	}
 
-	baseCfg := zap.NewProductionConfig()
-	baseCfg.DisableStacktrace = true
-	baseCfg.Level = lvl
-	baseCfg.Encoding = enc
-	baseCfg.DisableCaller = !*cfg.IncludeLine
-	baseCfg.EncoderConfig.NameKey = "component"
-	baseCfg.EncoderConfig.TimeKey = "timestamp"
-	baseCfg.EncoderConfig.EncodeTime = ts
+	// Always write to stdout.
+	writeSyncer := zapcore.AddSync(os.Stdout)
 
-	return baseCfg.Build()
+	// If a log file is configured, add a sync that is wrapped around lumberjack
+	// for log rotation. Building log rotation into the logger means operators
+	// don't have to set this up separately, thus lowering the barrier to entry.
+	if cfg.File != "" {
+		fileWriter := zapcore.AddSync(&lumberjack.Logger{
+			Filename:   cfg.File,
+			MaxSize:    100,
+			MaxBackups: 5,
+			MaxAge:     30,
+			Compress:   true,
+		})
+		writeSyncer = zapcore.NewMultiWriteSyncer(writeSyncer, fileWriter)
+	}
+
+	core := zapcore.NewCore(encoder, writeSyncer, lvl)
+
+	opts := []zap.Option{
+		zap.WithCaller(*cfg.IncludeLine),
+	}
+	if *cfg.EnableStacktrace {
+		opts = append(opts, zap.AddStacktrace(zapcore.ErrorLevel))
+	}
+
+	return zap.New(core, opts...), nil
 }
