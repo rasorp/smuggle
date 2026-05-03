@@ -14,7 +14,7 @@ require (
 	github.com/shoenig/test v1.13.2
 	github.com/urfave/cli/v3 v3.8.0
 	github.com/vishvananda/netlink v1.3.1
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 	gopkg.in/lumberjack.v2 v2.0.0
 )
 
