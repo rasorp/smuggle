@@ -13,6 +13,7 @@ func (p *Provider) createIPv4(
 	cfg *types.Subnet,
 	providerCfg *Config,
 	vtepDevIndex int,
+	hostIfaceName string,
 ) (*netlink.Vxlan, error) {
 
 	intfName := cfg.InterfaceName()
@@ -44,15 +45,27 @@ func (p *Provider) createIPv4(
 		return nil, fmt.Errorf("failed to enable ipv4 forwarding: %w", err)
 	}
 
-	// Disable reverse path filtering for the VXLAN interface to allow asymmetric routing
-	// This is necessary for overlay networks where return traffic may come via different paths
+	// Disable reverse path filtering for the VXLAN interface to allow
+	// asymmetric routing. This is necessary for overlay networks where return
+	// traffic may come via different paths.
 	if _, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", intfName), "0"); err != nil {
 		return nil, fmt.Errorf("failed to disable rp_filter for %s: %w", intfName, err)
 	}
 
-	// Also disable rp_filter on all interfaces to ensure forwarding works
+	// Disable rp_filter on the physical host interface explicitly. The kernel
+	// computes the effective rp_filter per interface, so setting conf/all=0
+	// alone is insufficient if the interface has its own non-zero value.
+	// Without this, asymmetric routing causes the host to silently drop return
+	// packets whose reverse path resolves to the VXLAN interface rather than
+	// the physical one.
+	if _, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", hostIfaceName), "0"); err != nil {
+		return nil, fmt.Errorf("failed to disable rp_filter for host interface %s: %w", hostIfaceName, err)
+	}
+
+	// Set the global baseline to 0. This does not override per-interface values
+	// but ensures any newly created interfaces inherit a permissive default.
 	if _, err := sysctl.Sysctl("net/ipv4/conf/all/rp_filter", "0"); err != nil {
-		return nil, fmt.Errorf("failed to disable rp_filter for all interfaces: %w", err)
+		return nil, fmt.Errorf("failed to disable rp_filter globally: %w", err)
 	}
 
 	return vxlanLink, nil
