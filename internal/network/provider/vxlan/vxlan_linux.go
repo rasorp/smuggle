@@ -28,6 +28,17 @@ const (
 	// encapsulation. This is used to adjust the MTU of the VXLAN interface to
 	// avoid fragmentation.
 	vxlanEncapuslationOverhead = 50
+
+	// smuggleRoutingTableID is the custom routing table ID managed by smuggle
+	// for policy-based routing. Traffic originating from local container
+	// subnets uses this table to force return paths back through the VXLAN
+	// tunnel.
+	smuggleRoutingTableID = 100
+
+	// smuggleRulePriority is the ip-rule priority for smuggle policy rules.
+	// Lower numbers take precedence; 100 places these rules above the main
+	// table (253) but below local (0) and any operator-defined rules above 100.
+	smuggleRulePriority = 100
 )
 
 type Provider struct {
@@ -58,7 +69,7 @@ func (p *Provider) SetLocal(
 		}
 	}
 
-	vxlanLink, err := p.createIPv4(req.Client, &cfg, req.HostInteface.Index)
+	vxlanLink, err := p.createIPv4(req.Client, &cfg, req.HostInteface.Index, req.HostInteface.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +193,75 @@ func (p *Provider) DeleteRemote(
 		return nil, err
 	}
 
+	// Remove the neighbor entry for the remote host's physical IP on the VXLAN
+	// interface that was added for policy routing.
+	hostARPEntry := netlink.Neigh{
+		LinkIndex: vxlan.Index,
+		Family:    syscall.AF_INET,
+		State:     netlink.NUD_PERMANENT,
+		IP:        *req.Subnet.HostIPv4,
+	}
+	if err := retry.Retry(func() error {
+		if err := netlink.NeighDel(&hostARPEntry); err != nil {
+			p.logger.Warn("failed to delete host ARP entry", zap.Error(err))
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Remove the host route from the smuggle routing table.
+	hostRoute := &netlink.Route{
+		LinkIndex: vxlan.Index,
+		Dst: &net.IPNet{
+			IP:   *req.Subnet.HostIPv4,
+			Mask: net.CIDRMask(32, 32),
+		},
+		Table: smuggleRoutingTableID,
+	}
+	if err := retry.Retry(func() error {
+		if err := netlink.RouteDel(hostRoute); err != nil {
+			p.logger.Warn("failed to delete policy host route", zap.Error(err))
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Only remove the ip rules when no host routes remain in the smuggle
+	// routing table. The rules (src localSubnet → table 100) are shared by
+	// all remote hosts; removing them while any remote still has a /32 host
+	// route in table 100 would break policy routing for those remotes.
+	remainingRoutes, err := netlink.RouteListFiltered(syscall.AF_INET, &netlink.Route{
+		Table: smuggleRoutingTableID,
+	}, netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list routes in smuggle routing table: %w", err)
+	}
+
+	if len(remainingRoutes) == 0 {
+		for _, localSubnet := range req.LocalSubnets {
+			if localSubnet.IPv4Network == nil {
+				continue
+			}
+			rule := netlink.NewRule()
+			rule.Src = localSubnet.IPv4Network.ToIPNet()
+			rule.Table = smuggleRoutingTableID
+			rule.Priority = smuggleRulePriority
+
+			if err := netlink.RuleDel(rule); err != nil && !errors.Is(err, syscall.ENOENT) {
+				return nil, fmt.Errorf("failed to delete policy rule for subnet %s: %w",
+					localSubnet.IPv4Network, err)
+			}
+			p.logger.Debug("removed policy routing rule",
+				zap.String("src_subnet", localSubnet.IPv4Network.String()),
+				zap.Int("table", smuggleRoutingTableID),
+			)
+		}
+	}
+
 	return &types.NetworkProviderDeleteRemoteResp{}, nil
 }
 
@@ -288,6 +368,71 @@ func (p *Provider) SetRemote(
 		return err
 	}); err != nil {
 		return nil, err
+	}
+
+	// Add a neighbor entry mapping the remote host's physical IP to the VTEP
+	// MAC on the VXLAN interface. This allows the host-route below to resolve
+	// L2 without broadcasting on the overlay.
+	hostARPEntry := netlink.Neigh{
+		LinkIndex:    vxlan.Index,
+		Family:       syscall.AF_INET,
+		State:        netlink.NUD_PERMANENT,
+		IP:           *req.Subnet.HostIPv4,
+		HardwareAddr: hwAddr,
+	}
+	if err := retry.Retry(func() error {
+		if err := netlink.NeighSet(&hostARPEntry); err != nil {
+			p.logger.Warn("failed to add host ARP entry", zap.Error(err))
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Add a host route for the remote physical IP into the smuggle routing
+	// table, directing it through the VXLAN interface so the outer UDP/VXLAN
+	// packet uses a symmetric path and AWS security groups track it correctly.
+	hostRoute := &netlink.Route{
+		LinkIndex: vxlan.Index,
+		Dst: &net.IPNet{
+			IP:   *req.Subnet.HostIPv4,
+			Mask: net.CIDRMask(32, 32),
+		},
+		Scope: netlink.SCOPE_LINK,
+		Table: smuggleRoutingTableID,
+	}
+	if err := retry.Retry(func() error {
+		if err := netlink.RouteReplace(hostRoute); err != nil {
+			p.logger.Warn("failed to add policy host route", zap.Error(err))
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// For each local subnet, install an ip rule that steers traffic originating
+	// from that subnet into the smuggle routing table. This ensures replies
+	// from local containers to a remote host's physical IP are routed via the
+	// VXLAN interface, so the return path is symmetric.
+	for _, localSubnet := range req.LocalSubnets {
+		if localSubnet.IPv4Network == nil {
+			continue
+		}
+		rule := netlink.NewRule()
+		rule.Src = localSubnet.IPv4Network.ToIPNet()
+		rule.Table = smuggleRoutingTableID
+		rule.Priority = smuggleRulePriority
+
+		if err := netlink.RuleAdd(rule); err != nil && !errors.Is(err, syscall.EEXIST) {
+			return nil, fmt.Errorf("failed to add policy rule for subnet %s: %w",
+				localSubnet.IPv4Network, err)
+		}
+		p.logger.Debug("successfully added policy routing rule",
+			zap.String("src_subnet", localSubnet.IPv4Network.String()),
+			zap.Int("table", smuggleRoutingTableID),
+		)
 	}
 
 	return &types.NetworkProviderSetRemoteResp{}, nil

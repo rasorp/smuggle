@@ -63,7 +63,10 @@ func (c *Client) handleSubnetDelete(subnets []*types.Subnet) {
 
 		c.logger.Debug("deleting remote subnet networking", subnet.LoggingPairs()...)
 
-		_, err := c.networkManager.DeleteRemote(&types.NetworkProviderDeleteRemoteReq{Subnet: subnet})
+		_, err := c.networkManager.DeleteRemote(&types.NetworkProviderDeleteRemoteReq{
+			Subnet:       subnet,
+			LocalSubnets: c.subnets,
+		})
 		if err != nil {
 			c.logger.Error("failed to delete remote subnet networking",
 				append(subnet.LoggingPairs(), zap.Error(err))...,
@@ -86,7 +89,10 @@ func (c *Client) handleSubnetSet(subnets []*types.Subnet) {
 
 		c.logger.Debug("setting up remote subnet networking", subnet.LoggingPairs()...)
 
-		_, err := c.networkManager.SetRemote(&types.NetworkProviderSetRemoteReq{Subnet: subnet})
+		_, err := c.networkManager.SetRemote(&types.NetworkProviderSetRemoteReq{
+			Subnet:       subnet,
+			LocalSubnets: c.subnets,
+		})
 		if err != nil {
 			c.logger.Error("failed to set up remote subnet networking",
 				append(subnet.LoggingPairs(), zap.Error(err))...,
