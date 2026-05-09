@@ -24,6 +24,9 @@ func Retry(fn func() error) error {
 	if err := retry.Exponential(ctx, 1*time.Second, func(ctx context.Context) error {
 		if latestErr := fn(); latestErr != nil {
 			if errors.Is(latestErr, context.DeadlineExceeded) {
+				if last == nil {
+					last = latestErr
+				}
 				return last
 			}
 			last = latestErr
