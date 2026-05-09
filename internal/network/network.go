@@ -141,6 +141,12 @@ func (m *Manager) GenerateIPv4Subnet(
 	return m.findRandomSubnet(id, cfg, usedSubnets, subnetSize, totalSubnets)
 }
 
+// calculateMaxAttempts returns the number of random-probe attempts to make when
+// searching for a free subnet. The result is at least 100 (so a nearly-empty
+// network still gets a reasonable number of probes) and capped at 1,000 (so a
+// dense network does not burn excessive CPU).
+func calculateMaxAttempts(usedCount int) int { return min(max(usedCount*3, 100), 1000) }
+
 // findRandomSubnet attempts to find an available subnet by random probing. This
 // is efficient when the network is sparsely allocated and provides better
 // distribution across the address space compared to sequential allocation.
@@ -152,10 +158,7 @@ func (m *Manager) findRandomSubnet(
 	totalSubnets int,
 ) (*types.Subnet, error) {
 
-	// Calculate number of probing attempts based on utilization. Try up to 3
-	// times the number of used subnets with the bounds of 100 and 1000.
-	maxAttempts := max(len(usedSubnets)*3, 100)
-	maxAttempts = max(maxAttempts, 1000)
+	maxAttempts := calculateMaxAttempts(len(usedSubnets))
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 
