@@ -9,3 +9,13 @@ updates:
       time: "08:00"
     labels:
       - "area/dependency/go"
+
+  - package-ecosystem: github-actions
+    directories:
+      - ".github/workflows"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "08:05"
+    labels:
+      - "area/dependency/actions"
