@@ -78,6 +78,14 @@ func (s *CNIStore) Set(cfg *types.CNIConfig) error {
 	}
 	tempFile = nil // Prevent deferred cleanup from trying to close again
 
+	// Guard against path traversal; cfg.Name must be a plain filename with no
+	// directory components. The name is based on the network name which is
+	// validated on read, but we add this extra check here to be safe since
+	// we're using it as a filename.
+	if cfg.Name != filepath.Base(cfg.Name) {
+		return fmt.Errorf("invalid config name %q: path traversal detected", cfg.Name)
+	}
+
 	filename := filepath.Join(s.path, cfg.Name+".conf")
 
 	// Atomically rename the temporary file to the target path
