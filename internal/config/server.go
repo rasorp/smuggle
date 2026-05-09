@@ -72,22 +72,29 @@ func (s *ServerConfig) Merge(other *ServerConfig) *ServerConfig {
 		return s
 	}
 
+	result := *s
+
 	if other.Enabled != nil {
-		s.Enabled = other.Enabled
+		result.Enabled = other.Enabled
 	}
 	if other.Reaper != nil {
-		if s.Reaper == nil {
-			s.Reaper = &ReaperConfig{}
+		if result.Reaper == nil {
+			result.Reaper = &ReaperConfig{}
+		} else {
+			// Deep-copy the nested pointer so we never write back through the
+			// receiver's Reaper field.
+			reaperCopy := *result.Reaper
+			result.Reaper = &reaperCopy
 		}
 		if other.Reaper.Interval != 0 {
-			s.Reaper.Interval = other.Reaper.Interval
+			result.Reaper.Interval = other.Reaper.Interval
 		}
 		if other.Reaper.Threshold != 0 {
-			s.Reaper.Threshold = other.Reaper.Threshold
+			result.Reaper.Threshold = other.Reaper.Threshold
 		}
 	}
 
-	return s
+	return &result
 }
 
 func (s *ServerConfig) Validate() []error {
