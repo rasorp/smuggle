@@ -16,7 +16,7 @@ const (
 	ComponentNameClient   = "client"
 	ComponentNameHTTP     = "http"
 	ComponentNameNetwork  = "network"
-	ComponentNameIptables = "store"
+	ComponentNameIptables = "iptables"
 )
 
 // Logger is an alias for zap.Logger which simplifies imports as all log

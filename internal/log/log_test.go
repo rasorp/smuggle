@@ -13,6 +13,38 @@ import (
 	"github.com/rasorp/smuggle/internal/helper"
 )
 
+func TestComponentName(t *testing.T) {
+	testCases := []struct {
+		constant string
+		expected string
+	}{
+		{ComponentNameAgent, "agent"},
+		{ComponentNameServer, "server"},
+		{ComponentNameClient, "client"},
+		{ComponentNameHTTP, "http"},
+		{ComponentNameNetwork, "network"},
+		{ComponentNameIptables, "iptables"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.expected, func(t *testing.T) {
+
+			must.Eq(t, tc.expected, tc.constant)
+
+			// Verify the constant works correctly as a zap logger name.
+			base, err := New(&config.LogConfig{
+				Level:            "info",
+				JSON:             helper.PointerOf(false),
+				IncludeLine:      helper.PointerOf(false),
+				EnableStacktrace: helper.PointerOf(false),
+			})
+
+			must.NoError(t, err)
+			must.StrContains(t, base.Named(tc.constant).Name(), tc.expected)
+		})
+	}
+}
+
 func TestNew(t *testing.T) {
 	testCases := []struct {
 		name        string
