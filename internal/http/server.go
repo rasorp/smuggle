@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -69,8 +70,13 @@ func (s *Server) setupRouter() *chi.Mux {
 func (s *Server) Start() error {
 	s.logger.Info("starting HTTP server", zap.String("address", s.server.Addr))
 
+	ln, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return fmt.Errorf("failed to setup HTTP listener: %w", err)
+	}
+
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			s.logger.Error("HTTP server error", zap.Error(err))
 		}
 	}()
