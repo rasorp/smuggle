@@ -167,6 +167,32 @@ func TestCNIStore_Set(t *testing.T) {
 			},
 		},
 		{
+			name:      "path traversal via dotdot segments",
+			storePath: t.TempDir(),
+			config: &types.CNIConfig{
+				Name: "../../etc/cron.d/evil",
+				MTU:  1450,
+				IPv4: &types.IPv4CNIConfig{
+					Network: "10.0.0.0/16",
+					Subnet:  "10.0.1.1/24",
+				},
+			},
+			expectedErrorContains: "path traversal detected",
+		},
+		{
+			name:      "path traversal via absolute path in name",
+			storePath: t.TempDir(),
+			config: &types.CNIConfig{
+				Name: "/etc/cron.d/evil",
+				MTU:  1450,
+				IPv4: &types.IPv4CNIConfig{
+					Network: "10.0.0.0/16",
+					Subnet:  "10.0.1.1/24",
+				},
+			},
+			expectedErrorContains: "path traversal detected",
+		},
+		{
 			name:      "read-only directory",
 			storePath: filepath.Join(t.TempDir(), "readonly"),
 			config: &types.CNIConfig{
