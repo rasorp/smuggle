@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 
 	"go.uber.org/zap"
 
@@ -87,9 +88,33 @@ func (n *Network) LoggingPairs() []zap.Field {
 	return f
 }
 
+// networkNameRe is the set of characters permitted in a network name. Names
+// must start with a lowercase letter and may only contain lowercase letters,
+// digits, hyphens, and underscores.
+var networkNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+// maxNetworkNameLen is the maximum number of characters allowed in a network
+// name. The binding constraint is BridgeInterfaceName(), which appends "brd0"
+// (4 chars) to the name. Linux caps interface names at 15 characters, so the
+// name itself must be no longer than 11 characters.
+const maxNetworkNameLen = 11
+
 // Validate performs validation on the network configuration to ensure it is
 // usable.
 func (n *Network) Validate() error {
+
+	// Validate the network name before it is used to derive Linux interface
+	// names and iptables rule specs.
+	if n.Name == "" {
+		return errors.New("network name must not be empty")
+	}
+	if len(n.Name) > maxNetworkNameLen {
+		return fmt.Errorf("network name %q is too long: maximum %d characters allowed",
+			n.Name, maxNetworkNameLen)
+	}
+	if !networkNameRe.MatchString(n.Name) {
+		return fmt.Errorf("network name %q is invalid: regex %s", n.Name, networkNameRe.String())
+	}
 
 	// Validation for the IPv4 configuration.
 	if n.IPv4 == nil {
