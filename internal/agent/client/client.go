@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -241,7 +242,7 @@ func (c *Client) generateID() error {
 	// Try to read existing ID from file
 	data, err := os.ReadFile(idFilePath)
 	if err == nil {
-		id := string(data)
+		id := strings.TrimSpace(string(data))
 		if id != "" {
 			c.id.Store(id)
 			return nil
