@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/json"
+
 	"github.com/hashicorp/nomad/api"
 	"github.com/urfave/cli/v3"
 
@@ -27,6 +29,23 @@ type NomadConfig struct {
 	ClientKey     string `hcl:"client_key,optional" json:"client_key"`
 	TLSServerName string `hcl:"tls_server_name,optional" json:"tls_server_name"`
 	SkipVerify    *bool  `hcl:"skip_verify,optional" json:"skip_verify"`
+}
+
+// MarshalJSON implements json.Marshaler, so that we can ensure the Token
+// parameter is replaced with "[redacted]" whenever it is non-empty. This
+// ensures that credentials are never exposed in diagnostics, structured logs,
+// or crash dumps.
+func (n NomadConfig) MarshalJSON() ([]byte, error) {
+
+	// 'plain' is a method-free alias of NomadConfig. json.Marshal called on a
+	// plain value uses normal struct serialisation without recursing back into
+	// this method.
+	type plain NomadConfig
+	p := plain(n)
+	if p.Token != "" {
+		p.Token = "[redacted]"
+	}
+	return json.Marshal(p)
 }
 
 func DefaultNomadConfig() *NomadConfig {
