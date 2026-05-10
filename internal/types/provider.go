@@ -23,8 +23,8 @@ type NetworkProvider interface {
 
 // NetworkProviderSetReq contains parameters for setting up a local subnet.
 type NetworkProviderSetReq struct {
-	HostInteface *net.Interface
-	Client       *Subnet
+	HostInterface *net.Interface
+	Client        *Subnet
 }
 
 // NetworkProviderSetResp contains the result of setting up a local subnet.

@@ -60,7 +60,7 @@ func (p *Provider) SetLocal(
 	cfg := Config{
 		VNI:  defaultVNI,
 		Port: defaultPort,
-		MTU:  req.HostInteface.MTU - vxlanEncapuslationOverhead,
+		MTU:  req.HostInterface.MTU - vxlanEncapuslationOverhead,
 	}
 
 	if req.Client.Config != nil {
@@ -69,7 +69,7 @@ func (p *Provider) SetLocal(
 		}
 	}
 
-	vxlanLink, err := p.createIPv4(req.Client, &cfg, req.HostInteface.Index, req.HostInteface.Name)
+	vxlanLink, err := p.createIPv4(req.Client, &cfg, req.HostInterface.Index, req.HostInterface.Name)
 	if err != nil {
 		return nil, err
 	}

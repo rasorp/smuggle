@@ -56,7 +56,7 @@ func (m *Manager) SetLocal(
 	req *types.NetworkProviderSetReq,
 ) (*types.NetworkProviderSetResp, error) {
 
-	req.HostInteface = m.fingerprint.iface
+	req.HostInterface = m.fingerprint.iface
 
 	provider, ok := m.providers[req.Client.Provider]
 	if !ok {
