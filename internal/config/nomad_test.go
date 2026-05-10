@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/shoenig/test/must"
@@ -8,6 +9,47 @@ import (
 
 	"github.com/rasorp/smuggle/internal/helper"
 )
+
+func TestNomadConfig_MarshalJSON(t *testing.T) {
+	testCases := []struct {
+		name          string
+		cfg           *NomadConfig
+		jsonToken     string
+		inMemoryToken string
+	}{
+		{
+			name:          "non-empty token is redacted",
+			cfg:           &NomadConfig{Address: "http://localhost:4646", Token: "s3cr3t-t0k3n"},
+			jsonToken:     "[redacted]",
+			inMemoryToken: "s3cr3t-t0k3n",
+		},
+		{
+			name:          "empty token serialises as empty string",
+			cfg:           &NomadConfig{Address: "http://localhost:4646", Token: ""},
+			jsonToken:     "",
+			inMemoryToken: "",
+		},
+		{
+			name:          "default config has no token to redact",
+			cfg:           DefaultNomadConfig(),
+			jsonToken:     "",
+			inMemoryToken: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(tc.cfg)
+			must.NoError(t, err)
+
+			var out NomadConfig
+			must.NoError(t, json.Unmarshal(data, &out))
+
+			must.Eq(t, tc.jsonToken, out.Token)
+			must.Eq(t, tc.inMemoryToken, tc.cfg.Token)
+		})
+	}
+}
 
 func Test_DefaultNomadConfig(t *testing.T) {
 	cfg := DefaultNomadConfig()
