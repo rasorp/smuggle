@@ -13,12 +13,9 @@ func (c *Client) startSubnetUpdateHandler() error {
 	for _, network := range c.networks {
 		c.logger.Debug("starting subnet watcher for network", zap.String("network_name", network.Name))
 
-		req := &types.StoreWatchSubnetsReq{
-			Context:     context.Background(),
-			NetworkName: network.Name,
-		}
+		req := &types.StoreWatchSubnetsReq{NetworkName: network.Name}
 
-		resp, err := c.store.WatchSubnets(req)
+		resp, err := c.store.WatchSubnets(context.Background(), req)
 		if err != nil {
 			return err
 		}
