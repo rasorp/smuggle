@@ -28,7 +28,7 @@ type Store interface {
 
 	SetSubnet(*StoreSetSubnetReq) (*StoreSetSubnetResp, error)
 
-	WatchSubnets(*StoreWatchSubnetsReq) (*StoreWatchSubnetsResp, error)
+	WatchSubnets(context.Context, *StoreWatchSubnetsReq) (*StoreWatchSubnetsResp, error)
 }
 
 type StoreDeleteSubnetReq struct {
@@ -69,7 +69,6 @@ type StoreGetSubnetResp struct {
 
 type StoreWatchSubnetsReq struct {
 	NetworkName string
-	Context     context.Context
 }
 
 type StoreWatchSubnetsResp struct {

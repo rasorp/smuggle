@@ -1,6 +1,7 @@
 package nvar
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -160,6 +161,7 @@ func parseNetwork(items map[string]string) (*types.Network, error) {
 // The function polls Nomad variables using blocking queries with the WaitIndex to efficiently
 // detect changes without excessive API calls.
 func (s *NomadVariableStore) WatchSubnets(
+	ctx context.Context,
 	req *types.StoreWatchSubnetsReq,
 ) (*types.StoreWatchSubnetsResp, error) {
 
@@ -177,7 +179,7 @@ func (s *NomadVariableStore) WatchSubnets(
 
 		for {
 			select {
-			case <-req.Context.Done():
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -190,20 +192,20 @@ func (s *NomadVariableStore) WatchSubnets(
 			}
 
 			// Add context to query options
-			queryOpts = queryOpts.WithContext(req.Context)
+			queryOpts = queryOpts.WithContext(ctx)
 
 			// List all client configuration variables
 			varList, queryMeta, err := s.client.Variables().List(queryOpts)
 			if err != nil {
 				select {
 				case errCh <- fmt.Errorf("failed to list subnets: %w", err):
-				case <-req.Context.Done():
+				case <-ctx.Done():
 					return
 				}
 				// Wait before retrying on error
 				select {
 				case <-time.After(10 * time.Second):
-				case <-req.Context.Done():
+				case <-ctx.Done():
 					return
 				}
 				continue
@@ -231,7 +233,7 @@ func (s *NomadVariableStore) WatchSubnets(
 				if err != nil {
 					select {
 					case errCh <- fmt.Errorf("failed to read subnet: %w", err):
-					case <-req.Context.Done():
+					case <-ctx.Done():
 						return
 					}
 					continue
@@ -242,7 +244,7 @@ func (s *NomadVariableStore) WatchSubnets(
 				if err != nil {
 					select {
 					case errCh <- fmt.Errorf("failed to parse subnet: %w", err):
-					case <-req.Context.Done():
+					case <-ctx.Done():
 						return
 					}
 					continue
@@ -259,7 +261,7 @@ func (s *NomadVariableStore) WatchSubnets(
 			if len(expiredConfigs) > 0 {
 				select {
 				case deleteCh <- expiredConfigs:
-				case <-req.Context.Done():
+				case <-ctx.Done():
 					return
 				}
 			}
@@ -267,7 +269,7 @@ func (s *NomadVariableStore) WatchSubnets(
 			if len(modifiedConfigs) > 0 {
 				select {
 				case modifyCh <- modifiedConfigs:
-				case <-req.Context.Done():
+				case <-ctx.Done():
 					return
 				}
 			}
