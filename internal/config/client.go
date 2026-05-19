@@ -29,7 +29,7 @@ type ClientConfig struct {
 
 	// DisableIPMasq disables IP masquerading for the client networks which is
 	// used for routing taffic from the container to the internet.
-	DisableIPMasq bool `hcl:"disable_ipmasq,optional" json:"disable_ipmasq"`
+	DisableIPMasq *bool `hcl:"disable_ipmasq,optional" json:"disable_ipmasq"`
 
 	// NetworkInterface specifies the network interface to use for client
 	// networking. If not specified, the default interface will be identified
@@ -41,7 +41,7 @@ func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
 		Enabled:          helper.PointerOf(false),
 		DataDir:          "/var/lib/smuggle/client",
-		DisableIPMasq:    false,
+		DisableIPMasq:    helper.PointerOf(false),
 		NetworkInterface: "",
 	}
 }
@@ -64,7 +64,7 @@ func (c *ClientConfig) Merge(other *ClientConfig) *ClientConfig {
 	if other.DataDir != "" {
 		result.DataDir = other.DataDir
 	}
-	if other.DisableIPMasq {
+	if other.DisableIPMasq != nil {
 		result.DisableIPMasq = other.DisableIPMasq
 	}
 	if other.NetworkInterface != "" {
@@ -131,7 +131,7 @@ func ClientConfigFromCommand(c *cli.Command) *ClientConfig {
 		cfg.Enabled = helper.PointerOf(c.Bool(clientEnabledFlag))
 	}
 	if c.IsSet(clientDisableIPMasqFlag) {
-		cfg.DisableIPMasq = c.Bool(clientDisableIPMasqFlag)
+		cfg.DisableIPMasq = helper.PointerOf(c.Bool(clientDisableIPMasqFlag))
 	}
 
 	return cfg

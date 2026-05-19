@@ -107,7 +107,7 @@ func TestAgentConfig_Merge(t *testing.T) {
 				Client: &ClientConfig{
 					Enabled:       helper.PointerOf(true),
 					DataDir:       "/custom/dir",
-					DisableIPMasq: false,
+					DisableIPMasq: helper.PointerOf(false),
 				},
 				HTTP: &HTTPConfig{
 					Enabled:        helper.PointerOf(true),
@@ -301,7 +301,7 @@ func Test_AgentConfigFromCommand(t *testing.T) {
 				Client: &ClientConfig{
 					Enabled:          helper.PointerOf(true),
 					DataDir:          "/opt/smuggle/subnet",
-					DisableIPMasq:    true,
+					DisableIPMasq:    helper.PointerOf(true),
 					NetworkInterface: "eth0",
 				},
 				HTTP: &HTTPConfig{
@@ -631,7 +631,7 @@ store {
 				Client: &ClientConfig{
 					Enabled:          helper.PointerOf(true),
 					DataDir:          "/var/lib/smuggle/client",
-					DisableIPMasq:    false,
+					DisableIPMasq:    helper.PointerOf(false),
 					NetworkInterface: "eth0",
 				},
 				HTTP: &HTTPConfig{
@@ -728,7 +728,7 @@ store {
 				Client: &ClientConfig{
 					Enabled:          helper.PointerOf(true),
 					DataDir:          "/var/lib/smuggle/client",
-					DisableIPMasq:    false,
+					DisableIPMasq:    helper.PointerOf(false),
 					NetworkInterface: "eth0",
 				},
 				HTTP: &HTTPConfig{
