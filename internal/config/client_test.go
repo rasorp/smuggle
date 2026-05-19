@@ -16,7 +16,7 @@ func Test_DefaultClientConfig(t *testing.T) {
 	must.NotNil(t, defaults)
 	must.False(t, *defaults.Enabled)
 	must.Eq(t, "/var/lib/smuggle/client", defaults.DataDir)
-	must.False(t, defaults.DisableIPMasq)
+	must.False(t, *defaults.DisableIPMasq)
 	must.Eq(t, "", defaults.NetworkInterface)
 }
 
@@ -69,12 +69,31 @@ func TestClientConfig_Merge(t *testing.T) {
 			expected: &ClientConfig{DataDir: "/custom/dir"},
 		},
 		{
-			name:  "override fields",
-			base:  &ClientConfig{DataDir: "/base/dir", DisableIPMasq: false},
-			other: &ClientConfig{DataDir: "/other/dir", DisableIPMasq: true},
+			name:  "true overrides false",
+			base:  &ClientConfig{DataDir: "/base/dir", DisableIPMasq: helper.PointerOf(false)},
+			other: &ClientConfig{DataDir: "/other/dir", DisableIPMasq: helper.PointerOf(true)},
 			expected: &ClientConfig{
 				DataDir:       "/other/dir",
-				DisableIPMasq: true,
+				DisableIPMasq: helper.PointerOf(true),
+			},
+		},
+		{
+			// This is the case the original bool type made impossible.
+			name:  "false overrides true",
+			base:  &ClientConfig{DataDir: "/base/dir", DisableIPMasq: helper.PointerOf(true)},
+			other: &ClientConfig{DataDir: "/other/dir", DisableIPMasq: helper.PointerOf(false)},
+			expected: &ClientConfig{
+				DataDir:       "/other/dir",
+				DisableIPMasq: helper.PointerOf(false),
+			},
+		},
+		{
+			name:  "nil DisableIPMasq does not override",
+			base:  &ClientConfig{DataDir: "/base/dir", DisableIPMasq: helper.PointerOf(true)},
+			other: &ClientConfig{DataDir: "/other/dir"},
+			expected: &ClientConfig{
+				DataDir:       "/other/dir",
+				DisableIPMasq: helper.PointerOf(true),
 			},
 		},
 	}
@@ -195,7 +214,7 @@ func Test_ClientConfigFromComand(t *testing.T) {
 			expected: &ClientConfig{
 				Enabled:          helper.PointerOf(true),
 				DataDir:          "/custom/dir",
-				DisableIPMasq:    true,
+				DisableIPMasq:    helper.PointerOf(true),
 				NetworkInterface: "eth0",
 			},
 		},
