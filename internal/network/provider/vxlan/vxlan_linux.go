@@ -203,6 +203,9 @@ func (p *Provider) DeleteRemote(
 	}
 	if err := retry.Retry(func() error {
 		if err := netlink.NeighDel(&hostARPEntry); err != nil {
+			if errors.Is(err, syscall.ENOENT) {
+				return nil
+			}
 			p.logger.Warn("failed to delete host ARP entry", zap.Error(err))
 			return err
 		}
@@ -211,17 +214,24 @@ func (p *Provider) DeleteRemote(
 		return nil, err
 	}
 
-	// Remove the host route from the smuggle routing table.
+	// Remove the host route from the smuggle routing table. The scope must
+	// match what was set in SetRemote (SCOPE_LINK); the kernel's
+	// fib_table_delete treats scope=0 (UNIVERSE) as an exact filter, not a
+	// wildcard, so omitting it causes ESRCH even when the route is present.
 	hostRoute := &netlink.Route{
 		LinkIndex: vxlan.Index,
 		Dst: &net.IPNet{
 			IP:   *req.Subnet.HostIPv4,
 			Mask: net.CIDRMask(32, 32),
 		},
+		Scope: netlink.SCOPE_LINK,
 		Table: smuggleRoutingTableID,
 	}
 	if err := retry.Retry(func() error {
 		if err := netlink.RouteDel(hostRoute); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return nil
+			}
 			p.logger.Warn("failed to delete policy host route", zap.Error(err))
 			return err
 		}
