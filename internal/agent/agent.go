@@ -26,6 +26,7 @@ type Agent struct {
 	httpServer *http.Server
 	start      func() error
 	stop       func() error
+	reload     func()
 }
 
 // AgentReq is the configuration used to construct a new Agent.
@@ -39,6 +40,10 @@ type AgentReq struct {
 
 	// Stop is called by Agent.Stop after the HTTP server has been shut down.
 	Stop func() error
+
+	// Reload is an optional function called when SIGHUP is received. It
+	// should trigger a non-blocking reload of dynamic configuration.
+	Reload func()
 }
 
 // New constructs an Agent from the provided AgentReq. If HTTP is enabled in
@@ -53,6 +58,7 @@ func New(req *AgentReq) (*Agent, error) {
 		logger: req.Logger.Named(log.ComponentNameAgent),
 		start:  req.Start,
 		stop:   req.Stop,
+		reload: req.Reload,
 	}
 
 	if req.HTTPConfig != nil && req.HTTPConfig.Enabled != nil && *req.HTTPConfig.Enabled {
@@ -134,7 +140,10 @@ func (a *Agent) WaitForSignal() {
 
 		switch sig {
 		case syscall.SIGHUP:
-			a.logger.Info("SIGHUP received, configuration reload not yet implemented")
+			a.logger.Info("SIGHUP received, reloading agent")
+			if a.reload != nil {
+				a.reload()
+			}
 		default:
 			a.logger.Info("shutting down")
 			if err := a.Stop(); err != nil {

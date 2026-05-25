@@ -11,6 +11,11 @@ type NetworkProvider interface {
 	// Name returns the unique identifier for this provider.
 	Name() string
 
+	// DeleteLocal removes the local subnet configuration from this host. This
+	// is called when a network has been removed and we need to clean up local
+	// resources.
+	DeleteLocal(req *NetworkProviderDeleteLocalReq) (*NetworkProviderDeleteLocalResp, error)
+
 	// SetLocal configures the local subnet for this host.
 	SetLocal(*NetworkProviderSetReq) (*NetworkProviderSetResp, error)
 
@@ -20,6 +25,12 @@ type NetworkProvider interface {
 	// SetRemote configures routing to a remote subnet.
 	SetRemote(*NetworkProviderSetRemoteReq) (*NetworkProviderSetRemoteResp, error)
 }
+
+type NetworkProviderDeleteLocalReq struct {
+	Subnet *Subnet
+}
+
+type NetworkProviderDeleteLocalResp struct{}
 
 // NetworkProviderSetReq contains parameters for setting up a local subnet.
 type NetworkProviderSetReq struct {

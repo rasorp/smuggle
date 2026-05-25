@@ -44,11 +44,23 @@ type Client struct {
 	networkManager *network.Manager
 
 	// networks tracks the networks that this Smuggle client is aware of and
-	// should configure on the host.
-	networks []*types.Network
+	// should configure on the host. This is used to compare against updates
+	// from the store to determine when networks are added or removed. All
+	// access to this slice must be synchronized using the networksLock mutex.
+	networks     []*types.Network
+	networksLock sync.RWMutex
+
+	subnetWatchers     map[string]*subnetWatcher
+	subnetWatchersLock sync.Mutex
+
+	// subnetHeartbeaters tracks the currently running subnet heartbeaters. It
+	// is keyed by subnet ID and all access must be synchronized using the
+	// subnetHeartbeatersLock mutex.
+	subnetHeartbeaters     map[string]*heartbeater
+	subnetHeartbeatersLock sync.Mutex
 
 	//
-	subnets []*types.Subnet
+	reloadCh chan struct{}
 
 	// shutdownCh is used to signal to all client processes that the agent is
 	// shutting down. All long-running processes should monitor this channel and
@@ -73,14 +85,29 @@ func New(req *ClientReq) (*Client, error) {
 	}
 
 	return &Client{
-		cfg:            req.Config,
-		logger:         req.Logger.Named(log.ComponentNameClient),
-		networks:       []*types.Network{},
-		store:          req.Store,
-		cniStore:       req.CNIStore,
-		networkManager: netManager,
-		shutdownCh:     make(chan struct{}),
+		cfg:                req.Config,
+		logger:             req.Logger.Named(log.ComponentNameClient),
+		networks:           []*types.Network{},
+		store:              req.Store,
+		cniStore:           req.CNIStore,
+		networkManager:     netManager,
+		reloadCh:           make(chan struct{}, 1),
+		shutdownCh:         make(chan struct{}),
+		subnetWatchers:     make(map[string]*subnetWatcher),
+		subnetHeartbeaters: make(map[string]*heartbeater),
 	}, nil
+}
+
+// Reload signals the client to immediately re-read the network list from the
+// store. If a reload is already pending, the signal is dropped to avoid
+// queuing up redundant work.
+func (c *Client) Reload() {
+	select {
+	case c.reloadCh <- struct{}{}:
+	default:
+		// If the channel is full, do not block. This means a reload is already
+		// pending, so we do not need to send another signal.
+	}
 }
 
 func (c *Client) Start() error {
@@ -89,15 +116,13 @@ func (c *Client) Start() error {
 		return fmt.Errorf("failed to get client ID: %w", err)
 	}
 
-	if err := c.Init(); err != nil {
-		return fmt.Errorf("failed to initialize client: %w", err)
-	}
+	// Perform the initial network setup synchronously so that all local subnets
+	// and remote subnet routes are in place before Start returns. The
+	// background monitor handles periodic refreshes and SIGHUP reloads after
+	// this point.
+	c.triggerNetworksRead()
 
-	if err := c.startSubnetUpdateHandler(); err != nil {
-		return fmt.Errorf("failed to start remote subnet handler: %w", err)
-	}
-
-	c.startHeartbeaters()
+	go c.monitorNetworks()
 
 	return nil
 }
@@ -131,107 +156,7 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-func (c *Client) Init() error {
-
-	// Read all network configurations from the store that we are able to see
-	// and therefore should configure on this host.
-	listResp, err := c.store.ListNetworks(nil)
-	if err != nil {
-		return fmt.Errorf("failed to get network configs: %w", err)
-	}
-
-	if len(listResp.Networks) == 0 {
-		return errors.New("no networks configurations found")
-	}
-
-	for _, networkConfig := range listResp.Networks {
-
-		// Validate the network configuration.
-		if err := networkConfig.Validate(); err != nil {
-			return fmt.Errorf("invalid network: %w", err)
-		}
-
-		c.networks = append(c.networks, networkConfig)
-
-		clientSubnetResp, err := c.store.GetSubnet(&types.StoreGetSubnetReq{
-			ID:          c.id.Load().(string),
-			NetworkName: networkConfig.Name,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to get client subnet config: %w", err)
-		}
-
-		// Perform the canonicalization, so we have all fields set correctly
-		// set. It would be possible to write this back to the data store, but
-		// seeing as this happens on the client, if more than one started at the
-		// same time, they would all race to write it back.
-		networkConfig.Canonicalize()
-
-		subnet := clientSubnetResp.Subnet
-
-		if subnet == nil {
-
-			//
-			subnetListReq := types.StoreListSubnetsReq{Network: networkConfig.Name}
-
-			subnetListResp, err := c.store.ListSubnets(&subnetListReq)
-			if err != nil {
-				return fmt.Errorf("failed to list existing client subnets: %w", err)
-			}
-
-			subnet, err = c.networkManager.GenerateIPv4Subnet(c.getID(), networkConfig, subnetListResp.Subnets)
-			if err != nil {
-				return fmt.Errorf("failed to generate IPv4 subnet: %w", err)
-			}
-		}
-
-		c.logger.Info("initializing local host subnet", networkConfig.LoggingPairs()...)
-
-		if err := c.initSubnet(networkConfig, subnet); err != nil {
-			return fmt.Errorf("failed to initialize subnet: %w", err)
-		}
-
-		c.subnets = append(c.subnets, subnet)
-
-		if networkConfig.IPMasq != nil && *networkConfig.IPMasq {
-			if err := c.networkManager.Firewall.SetupMasqRules(networkConfig, subnet); err != nil {
-				return fmt.Errorf("failed to set up firewall masquerade rules: %w", err)
-			}
-		}
-
-		if err := c.networkManager.Firewall.SetupForwardRules(networkConfig); err != nil {
-			return fmt.Errorf("failed to set up firewall forward rules: %w", err)
-		}
-
-		c.logger.Info("successfully initialized local host subnet", subnet.LoggingPairs()...)
-	}
-
-	if err := c.networkManager.Firewall.EnsureIsolation(c.networks); err != nil {
-		return fmt.Errorf("failed to ensure network isolation: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Client) initSubnet(netCfg *types.Network, cfg *types.Subnet) error {
-
-	providerResp, err := c.networkManager.SetLocal(&types.NetworkProviderSetReq{Client: cfg})
-	if err != nil {
-		return fmt.Errorf("failed to set up local subnet: %w", err)
-	}
-
-	if _, err := c.store.SetSubnet(&types.StoreSetSubnetReq{
-		Subnet: providerResp.Network,
-	}); err != nil {
-		return fmt.Errorf("failed to store client subnet: %w", err)
-	}
-
-	if err := c.cniStore.Set(types.GenerateCNIConfig(netCfg, cfg)); err != nil {
-		return fmt.Errorf("failed to write CNI config: %w", err)
-	}
-
-	return nil
-}
+func (c *Client) shutdownGroupDecrement() { c.shutdownGroup.Done() }
 
 // generateID attempts to read the client ID from disk. If the file does not exist,
 // it generates a new UUID, saves it to disk, and returns it.

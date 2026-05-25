@@ -1,6 +1,7 @@
 package types
 
 type CNIStore interface {
+	Delete(name string) error
 	Set(*CNIConfig) error
 }
 

@@ -37,7 +37,7 @@ type Manager struct {
 	logger *zap.Logger
 }
 
-// New creates a new iptables manager
+// NewManager creates a new iptables manager
 func NewManager(logger *zap.Logger) (types.Firewall, error) {
 	ipt, err := iptables.New()
 	if err != nil {
@@ -50,9 +50,128 @@ func NewManager(logger *zap.Logger) (types.Firewall, error) {
 	}, nil
 }
 
+// CreateForwardRules applies forward rules to iptables
+func (m *Manager) CreateForwardRules(network *types.Network) error {
+
+	cidr := network.IPv4.Network.String()
+	bridgeInterface := network.BridgeInterfaceName()
+	networkInterface := network.InterfaceName()
+
+	m.logger.Debug("setting up forward rules",
+		zap.String("network_cidr", cidr),
+		zap.String("bridge_interface", bridgeInterface),
+		zap.String("network_interface", networkInterface),
+	)
+
+	// Ensure the custom chain exists
+	if err := m.ensureChain("filter", smuggleForwardChainName); err != nil {
+		return fmt.Errorf("failed to ensure chain %s: %w", smuggleForwardChainName, err)
+	}
+
+	// Apply all rules to the Smuggle forward chain but skip the jump rule as
+	// we'll handle it separately.
+	for _, rule := range m.forwardRules(cidr, bridgeInterface, networkInterface) {
+		if rule.chain == forwardChainName {
+			continue
+		}
+		if err := m.applyRule(rule); err != nil {
+			return fmt.Errorf("failed to apply rule: %w", err)
+		}
+	}
+
+	// Ensure jump rule is FIRST in FORWARD chain and before Docker chains. This
+	// is critical because Docker chains don't have a final ACCEPT, so packets
+	// that don't match fall through to the DROP policy.
+	if err := m.ensureJumpRuleFirst("filter", forwardChainName, smuggleForwardChainName); err != nil {
+		return fmt.Errorf("failed to ensure jump rule is first: %w", err)
+	}
+
+	m.logger.Info("successfully set up forward rules")
+	return nil
+}
+
+// DeleteForwardRules removes the forward rules from iptables for the given
+// network.
+func (m *Manager) DeleteForwardRules(network *types.Network) error {
+
+	networkPairs := network.LoggingPairs()
+
+	m.logger.Debug("deleting forward rules", networkPairs...)
+
+	// Iterate over the rules and delete them. We do not consider errors
+	// fatal here, as we want to attempt to delete all rules as possible.
+	for _, rule := range m.forwardRules(
+		network.IPv4.Network.String(),
+		network.BridgeInterfaceName(),
+		network.InterfaceName(),
+	) {
+		if err := m.deleteRule(rule); err != nil {
+			m.logger.Error("failed to delete forward rule",
+				append(rule.loggingPairs(), zap.Error(err))...,
+			)
+		}
+	}
+
+	m.logger.Info("successfully deleted forward rules", networkPairs...)
+	return nil
+}
+
+// CreateMasqRules applies masquerading rules to iptables
+func (m *Manager) CreateMasqRules(network *types.Network, subnet *types.Subnet) error {
+
+	ipv4Network := network.IPv4.Network
+	ipv4Subnet := subnet.IPv4Network
+
+	m.logger.Debug("setting up masquerading rules",
+		zap.String("network_cidr", ipv4Network.String()),
+		zap.String("subnet_cidr", ipv4Subnet.String()),
+	)
+
+	// Ensure the custom chain exists
+	if err := m.ensureChain(natTableName, smugglePostroutingChainName); err != nil {
+		return fmt.Errorf("failed to ensure chain: %w", err)
+	}
+
+	// Iterate over the rules and apply them. Any error is considered fatal as
+	// we need these rules to be in place for proper networking.
+	for _, rule := range m.masqRules(ipv4Network, ipv4Subnet) {
+		if err := m.applyRule(rule); err != nil {
+			return fmt.Errorf("failed to apply rule: %w", err)
+		}
+	}
+
+	m.logger.Info("successfully set up masquerading rules",
+		zap.String("network_cidr", ipv4Network.String()),
+		zap.String("subnet_cidr", ipv4Subnet.String()),
+	)
+	return nil
+}
+
+// DeleteMasqRules removes masquerading rules from iptables for the given
+// network and subnet.
+func (m *Manager) DeleteMasqRules(network *types.Network, subnet *types.Subnet) error {
+
+	networkPairs := network.LoggingPairs()
+
+	m.logger.Debug("deleting masquerade rules", networkPairs...)
+
+	// Iterate over the rules and delete them. We do not consider errors fatal
+	// here, as we want to attempt to delete all rules as possible.
+	for _, rule := range m.masqRules(network.IPv4.Network, subnet.IPv4Network) {
+		if err := m.deleteRule(rule); err != nil {
+			m.logger.Error("failed to delete masquerade rule",
+				append(rule.loggingPairs(), zap.Error(err))...,
+			)
+		}
+	}
+
+	m.logger.Info("successfully deleted masquerade rules", networkPairs...)
+	return nil
+}
+
 // masqRules generates the iptables rules for masquerading traffic from the
 // network subnet to external destinations.
-func (i *Manager) masqRules(network *types.IPv4Net, subnet *types.IPv4Net) []rule {
+func (m *Manager) masqRules(network *types.IPv4Net, subnet *types.IPv4Net) []rule {
 	rules := []rule{
 		// Jump from POSTROUTING to our custom chain so we can manage rules
 		// independently in our own chain and perform this before other firewall
@@ -69,7 +188,7 @@ func (i *Manager) masqRules(network *types.IPv4Net, subnet *types.IPv4Net) []rul
 		},
 	}
 
-	supportsRandomFully := i.ipt.HasRandomFully()
+	supportsRandomFully := m.ipt.HasRandomFully()
 
 	networkString := network.String()
 	subnetString := subnet.String()
@@ -108,47 +227,16 @@ func (i *Manager) masqRules(network *types.IPv4Net, subnet *types.IPv4Net) []rul
 	return rules
 }
 
-// SetupMasqRules applies masquerading rules to iptables
-func (i *Manager) SetupMasqRules(network *types.Network, subnet *types.Subnet) error {
-
-	ipv4Network := network.IPv4.Network
-	ipv4Subnet := subnet.IPv4Network
-
-	i.logger.Debug("setting up masquerading rules",
-		zap.String("network_cidr", ipv4Network.String()),
-		zap.String("subnet_cidr", ipv4Subnet.String()),
-	)
-
-	// Ensure the custom chain exists
-	if err := i.ensureChain(natTableName, smugglePostroutingChainName); err != nil {
-		return fmt.Errorf("failed to ensure chain: %w", err)
-	}
-
-	// Iterate over the rules and apply them. Any error is considered fatal as
-	// we need these rules to be in place for proper networking.
-	for _, rule := range i.masqRules(ipv4Network, ipv4Subnet) {
-		if err := i.applyRule(rule); err != nil {
-			return fmt.Errorf("failed to apply rule: %w", err)
-		}
-	}
-
-	i.logger.Info("successfully set up masquerading rules",
-		zap.String("network_cidr", ipv4Network.String()),
-		zap.String("subnet_cidr", ipv4Subnet.String()),
-	)
-	return nil
-}
-
 // ensureChain ensures an iptables chain exists, creating it if necessary
-func (i *Manager) ensureChain(table, chain string) error {
-	chains, err := i.ipt.ListChains(table)
+func (m *Manager) ensureChain(table, chain string) error {
+	chains, err := m.ipt.ListChains(table)
 	if err != nil {
 		return fmt.Errorf("failed to list chains: %w", err)
 	}
 
 	// Check if chain already exists
 	if slices.Contains(chains, chain) {
-		i.logger.Debug("chain already exists, skipping creation",
+		m.logger.Debug("chain already exists, skipping creation",
 			zap.String("table", table),
 			zap.String("chain", chain),
 		)
@@ -156,16 +244,16 @@ func (i *Manager) ensureChain(table, chain string) error {
 	}
 
 	// Create the chain
-	i.logger.Debug("creating iptables chain",
+	m.logger.Debug("creating iptables chain",
 		zap.String("table", table),
 		zap.String("chain", chain),
 	)
 
-	if err := i.ipt.NewChain(table, chain); err != nil {
+	if err := m.ipt.NewChain(table, chain); err != nil {
 		return fmt.Errorf("failed to create chain: %w", err)
 	}
 
-	i.logger.Info("successfully created chain",
+	m.logger.Info("successfully created chain",
 		zap.String("table", table),
 		zap.String("chain", chain),
 	)
@@ -174,8 +262,9 @@ func (i *Manager) ensureChain(table, chain string) error {
 }
 
 // applyRule ensures an iptables rule exists, adding it if necessary
-func (i *Manager) applyRule(rule rule) error {
-	exists, err := i.ipt.Exists(rule.table, rule.chain, rule.spec...)
+func (m *Manager) applyRule(rule rule) error {
+
+	exists, err := m.ipt.Exists(rule.table, rule.chain, rule.spec...)
 	if err != nil {
 		return fmt.Errorf("failed to check if rule exists: %w", err)
 	}
@@ -185,15 +274,43 @@ func (i *Manager) applyRule(rule rule) error {
 	loggingPairs := rule.loggingPairs()
 
 	if !exists {
-		i.logger.Debug("applying iptables rule", loggingPairs...)
+		m.logger.Debug("applying iptables rule", loggingPairs...)
 
-		if err := i.ipt.Append(rule.table, rule.chain, rule.spec...); err != nil {
+		if err := m.ipt.Append(rule.table, rule.chain, rule.spec...); err != nil {
 			return fmt.Errorf("failed to apply rule: %w", err)
 		}
 
-		i.logger.Info("successfully applied iptables rule", loggingPairs...)
+		m.logger.Info("successfully applied iptables rule", loggingPairs...)
 	} else {
-		i.logger.Debug("iptables rule already exists, skipping apply", loggingPairs...)
+		m.logger.Debug("iptables rule already exists, skipping apply", loggingPairs...)
+	}
+
+	return nil
+}
+
+// deleteRule removes an iptables rule if it exists. If it does not exist, it
+// is a no-op.
+func (m *Manager) deleteRule(rule rule) error {
+
+	exists, err := m.ipt.Exists(rule.table, rule.chain, rule.spec...)
+	if err != nil {
+		return fmt.Errorf("failed to check if rule exists: %w", err)
+	}
+
+	// Generate the logging pairs once, that will be used in both branches and
+	// potentially multiple times.
+	loggingPairs := rule.loggingPairs()
+
+	if exists {
+		m.logger.Debug("deleting iptables rule", loggingPairs...)
+
+		if err := m.ipt.Delete(rule.table, rule.chain, rule.spec...); err != nil {
+			return fmt.Errorf("failed to delete rule: %w", err)
+		}
+
+		m.logger.Info("successfully deleted iptables rule", loggingPairs...)
+	} else {
+		m.logger.Debug("iptables rule does not exist, skipping delete", loggingPairs...)
 	}
 
 	return nil
@@ -201,7 +318,7 @@ func (i *Manager) applyRule(rule rule) error {
 
 // forwardRules generates iptables rules for forwarding traffic that allows
 // traffic to be forwarded to and from the network range.
-func (i *Manager) forwardRules(networkCIDR, bridgeInterface, networkInterface string) []rule {
+func (m *Manager) forwardRules(networkCIDR, bridgeInterface, networkInterface string) []rule {
 	return []rule{
 		// Jump to custom chain to manage forward rules independently. This
 		// ensures Smuggle rules are evaluated before other node firewall rules.
@@ -308,71 +425,31 @@ func (i *Manager) forwardRules(networkCIDR, bridgeInterface, networkInterface st
 	}
 }
 
-// SetupForwardRules applies forward rules to iptables
-func (i *Manager) SetupForwardRules(network *types.Network) error {
-
-	cidr := network.IPv4.Network.String()
-	bridgeInterface := network.BridgeInterfaceName()
-	networkInterface := network.InterfaceName()
-
-	i.logger.Debug("setting up forward rules",
-		zap.String("network_cidr", cidr),
-		zap.String("bridge_interface", bridgeInterface),
-		zap.String("network_interface", networkInterface),
-	)
-
-	// Ensure the custom chain exists
-	if err := i.ensureChain("filter", smuggleForwardChainName); err != nil {
-		return fmt.Errorf("failed to ensure chain %s: %w", smuggleForwardChainName, err)
-	}
-
-	// Apply all rules to the Smuggle forward chain but Skip the jump rule as
-	// we'll handle it separately.
-	for _, rule := range i.forwardRules(cidr, bridgeInterface, networkInterface) {
-		if rule.chain == forwardChainName {
-			continue
-		}
-		if err := i.applyRule(rule); err != nil {
-			return fmt.Errorf("failed to apply rule: %w", err)
-		}
-	}
-
-	// Ensure jump rule is FIRST in FORWARD chain and before Docker chains. This
-	// is critical because Docker chains don't have a final ACCEPT, so packets
-	// that don't match fall through to the DROP policy.
-	if err := i.ensureJumpRuleFirst("filter", forwardChainName, smuggleForwardChainName); err != nil {
-		return fmt.Errorf("failed to ensure jump rule is first: %w", err)
-	}
-
-	i.logger.Info("successfully set up forward rules")
-	return nil
-}
-
-// ensureJumpRuleFirst ensures a jump rule exists and is at position 1
-// This is necessary to ensure Smuggle rules run before Docker's chains
-func (i *Manager) ensureJumpRuleFirst(table, chain, targetChain string) error {
+// ensureJumpRuleFirst ensures a jump rule exists and is at position 1.
+// This is necessary to ensure Smuggle rules run before Docker's chains.
+func (m *Manager) ensureJumpRuleFirst(table, chain, targetChain string) error {
 	ruleSpec := []string{"-m", "comment", "--comment", "smuggle forward", "-j", targetChain}
 
 	// Check if rule exists
-	exists, err := i.ipt.Exists(table, chain, ruleSpec...)
+	exists, err := m.ipt.Exists(table, chain, ruleSpec...)
 	if err != nil {
 		return fmt.Errorf("failed to check if jump rule exists: %w", err)
 	}
 
 	if exists {
 		// Rule exists but might not be first. Delete and re-insert.
-		if err := i.ipt.Delete(table, chain, ruleSpec...); err != nil {
-			i.logger.Warn("failed to delete existing jump rule, will try to insert anyway",
+		if err := m.ipt.Delete(table, chain, ruleSpec...); err != nil {
+			m.logger.Warn("failed to delete existing jump rule, will try to insert anyway",
 				zap.Error(err))
 		}
 	}
 
 	// Insert at position 1 (first rule, before Docker chains)
-	if err := i.ipt.Insert(table, chain, 1, ruleSpec...); err != nil {
+	if err := m.ipt.Insert(table, chain, 1, ruleSpec...); err != nil {
 		return fmt.Errorf("failed to insert jump rule at position 1: %w", err)
 	}
 
-	i.logger.Info("ensured jump rule is first in chain",
+	m.logger.Info("ensured jump rule is first in chain",
 		zap.String("table", table),
 		zap.String("chain", chain),
 		zap.String("target", targetChain),
@@ -381,25 +458,22 @@ func (i *Manager) ensureJumpRuleFirst(table, chain, targetChain string) error {
 	return nil
 }
 
-// EnsureIsolation creates REJECT rules to prevent cross-network communication.
+// CreateIsolation creates REJECT rules to prevent cross-network communication.
 // For each pair of networks, it creates rules that reject traffic from one
 // network's interfaces to another network's interfaces. This uses the +
 // wildcard to match all interfaces belonging to a network (both bridge and
 // VXLAN).
-func (i *Manager) EnsureIsolation(networks []*types.Network) error {
+func (m *Manager) CreateIsolation(networks []*types.Network) error {
 
 	// There is no need to apply isolation rules if there are less than 2
 	// networks.
 	if len(networks) < 2 {
-		i.logger.Debug("no isolation rules needed", zap.Int("network_count", len(networks)))
+		m.logger.Debug("no isolation rules needed")
 		return nil
 	}
 
-	i.logger.Info("ensuring network isolation",
-		zap.Int("network_count", len(networks)))
-
 	// Ensure the custom chain exists
-	if err := i.ensureChain("filter", smuggleForwardChainName); err != nil {
+	if err := m.ensureChain("filter", smuggleForwardChainName); err != nil {
 		return fmt.Errorf("failed to ensure chain: %w", err)
 	}
 
@@ -408,7 +482,6 @@ func (i *Manager) EnsureIsolation(networks []*types.Network) error {
 
 	// For each network, create REJECT rules to all other networks
 	for _, sourceNetwork := range networks {
-		sourcePrefix := sourceNetwork.Name + "+"
 
 		for _, destNetwork := range networks {
 			// Skip if same network
@@ -416,69 +489,109 @@ func (i *Manager) EnsureIsolation(networks []*types.Network) error {
 				continue
 			}
 
-			destPrefix := destNetwork.Name + "+"
-
 			// Create REJECT rule for this network pair. The + wildcard matches
 			// both bridge and VXLAN interfaces.
-			isolationRules = append(isolationRules, rule{
-				id:    fmt.Sprintf("reject-%s-to-%s", sourceNetwork.Name, destNetwork.Name),
-				table: "filter",
-				chain: smuggleForwardChainName,
-				spec: []string{
-					"-i", sourcePrefix,
-					"-o", destPrefix,
-					"-m", "comment",
-					"--comment", fmt.Sprintf("smuggle isolate %s from %s", sourceNetwork.Name, destNetwork.Name),
-					"-j", "REJECT",
-					"--reject-with", "icmp-net-prohibited",
-				},
-			})
+			isolationRules = append(
+				isolationRules,
+				m.isolationRule(sourceNetwork.Name+"+", destNetwork.Name+"+"),
+			)
 		}
 	}
 
-	i.logger.Debug("applying isolation rules",
-		zap.Int("rule_count", len(isolationRules)))
+	m.logger.Debug("creating isolation rules")
 
-	// Apply all isolation rules
-	// These need to be inserted near the beginning of the chain, right after
-	// ESTABLISHED,RELATED but before any ACCEPT rules
 	for _, rule := range isolationRules {
-		if err := i.ensureIsolationRule(rule); err != nil {
-			return fmt.Errorf("failed to apply isolation rule: %w", err)
+		if err := m.ensureIsolationRule(rule); err != nil {
+			return fmt.Errorf("failed to create isolation rule: %w", err)
 		}
 	}
 
-	i.logger.Info("successfully ensured network isolation",
-		zap.Int("network_count", len(networks)),
-		zap.Int("rule_count", len(isolationRules)))
-
+	m.logger.Info("successfully created isolation rules")
 	return nil
 }
 
 // ensureIsolationRule ensures an isolation REJECT rule exists in the chain.
 // Unlike applyRule which appends, this inserts the rule at a specific position
 // to ensure isolation rules run before ACCEPT rules.
-func (i *Manager) ensureIsolationRule(rule rule) error {
-	exists, err := i.ipt.Exists(rule.table, rule.chain, rule.spec...)
+func (m *Manager) ensureIsolationRule(rule rule) error {
+	exists, err := m.ipt.Exists(rule.table, rule.chain, rule.spec...)
 	if err != nil {
 		return fmt.Errorf("failed to check if rule exists: %w", err)
 	}
 
-	loggingPairs := rule.loggingPairs()
-
 	if !exists {
-		i.logger.Debug("inserting isolation rule", loggingPairs...)
+		m.logger.Debug("creating isolation rule", rule.loggingPairs()...)
 
-		// Insert at position 2 (right after ESTABLISHED,RELATED which is at position 1)
-		// This ensures isolation rules run before any ACCEPT rules
-		if err := i.ipt.Insert(rule.table, rule.chain, 2, rule.spec...); err != nil {
-			return fmt.Errorf("failed to insert isolation rule: %w", err)
+		// Insert at position 2 which is immediately after ESTABLISHED,RELATED
+		// which is at position 1. This ensures isolation rules run before any
+		// ACCEPT rules.
+		if err := m.ipt.Insert(rule.table, rule.chain, 2, rule.spec...); err != nil {
+			return fmt.Errorf("failed to create isolation rule: %w", err)
 		}
-
-		i.logger.Info("successfully inserted isolation rule", loggingPairs...)
-	} else {
-		i.logger.Debug("isolation rule already exists, skipping", loggingPairs...)
 	}
 
 	return nil
+}
+
+// DeleteIsolation removes the isolation rules for the deleted networks, while
+// keeping the rules for the existing networks intact.
+func (m *Manager) DeleteIsolation(exist, deleted []*types.Network) error {
+
+	if len(deleted) == 0 {
+		m.logger.Debug("no networks to delete isolation rules for")
+		return nil
+	}
+
+	m.logger.Debug("deleting network isolation rules")
+
+	// Build a combined list of all networks (existing + deleted) to check against
+	allNetworks := append([]*types.Network{}, exist...)
+	allNetworks = append(allNetworks, deleted...)
+
+	// For each deleted network, remove all isolation rules where it appears
+	// as either source or destination
+	for _, deletedNetwork := range deleted {
+		deletedPrefix := deletedNetwork.Name + "+"
+
+		for _, otherNetwork := range allNetworks {
+
+			// Skip if same network.
+			if deletedNetwork.Name == otherNetwork.Name {
+				continue
+			}
+
+			otherPrefix := otherNetwork.Name + "+"
+
+			// Delete rule where deleted network is the SOURCE (deleted -> other)
+			if err := m.deleteRule(m.isolationRule(deletedPrefix, otherPrefix)); err != nil {
+				return fmt.Errorf("failed to delete isolation rule: %w", err)
+			}
+
+			// Delete rule where deleted network is the DESTINATION (other -> deleted)
+			if err := m.deleteRule(m.isolationRule(otherPrefix, deletedPrefix)); err != nil {
+				return fmt.Errorf("failed to delete isolation rule: %w", err)
+			}
+		}
+	}
+
+	m.logger.Info("successfully deleted network isolation rules")
+	return nil
+}
+
+// isolationRule generates the isolation REJECT rule for the given source and
+// destination interface prefixes.
+func (m *Manager) isolationRule(src, dst string) rule {
+	return rule{
+		id:    fmt.Sprintf("reject-%s-to-%s", src, dst),
+		table: "filter",
+		chain: smuggleForwardChainName,
+		spec: []string{
+			"-i", src,
+			"-o", dst,
+			"-m", "comment",
+			"--comment", fmt.Sprintf("smuggle isolate %s from %s", src, dst),
+			"-j", "REJECT",
+			"--reject-with", "icmp-net-prohibited",
+		},
+	}
 }

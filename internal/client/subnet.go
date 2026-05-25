@@ -2,106 +2,150 @@ package client
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/rasorp/smuggle/internal/network"
 	"github.com/rasorp/smuggle/internal/types"
 )
 
-func (c *Client) startSubnetUpdateHandler() error {
+type subnetWatcher struct {
+	cID            string
+	logger         *zap.Logger
+	store          types.Store
+	network        *types.Network
+	networkManager *network.Manager
 
-	for _, network := range c.networks {
-		c.logger.Info("starting network subnet watcher", network.LoggingPairs()...)
+	// localSubnet is the local subnet allocated for this network on the
+	// current host. It is used to populate LocalSubnets in SetRemote and
+	// DeleteRemote calls for policy-based routing.
+	localSubnet *types.Subnet
 
-		req := &types.StoreWatchSubnetsReq{NetworkName: network.Name}
+	// shutdownCh is the client shutdown channel used to indicate that the agent
+	// is shutting down and all long-running processes should exit. This is a
+	// coarse-grained signal.
+	shutdownCh chan struct{}
 
-		resp, err := c.store.WatchSubnets(context.Background(), req)
-		if err != nil {
-			return err
-		}
+	// stopCh is used to signal to this specific subnet watcher that it should
+	// stop. This allows for more fine-grained control, such as when a subnet is
+	// removed.
+	stopCh chan struct{}
 
-		go c.subnetUpdateHandlerImpl(resp)
-	}
-	return nil
+	// stopWGFn is a callback function that should be called when the
+	// subnet watcher has fully stopped. This allows for proper coordination of
+	// shutdown processes across the client.
+	stopWGFn func()
+
+	// stopOnce ensures that the stop process is only initiated once, preventing
+	// potential issues from multiple stop signals.
+	stopOnce sync.Once
 }
 
-func (c *Client) subnetUpdateHandlerImpl(req *types.StoreWatchSubnetsResp) {
-	c.shutdownGroup.Add(1)
-	defer c.shutdownGroup.Done()
+func (s *subnetWatcher) start() {
+
+	s.logger.Debug("starting remote subnet watcher", zap.String("network_name", s.network.Name))
+
+	req := &types.StoreWatchSubnetsReq{
+		NetworkName: s.network.Name,
+	}
+
+	// The watch subnets store call currently will only ever return a nil error,
+	// so we can ignore it here. In the future, if the nvar store implementation
+	// changes or a new store is added, we may need to handle errors here.
+	resp, _ := s.store.WatchSubnets(context.Background(), req)
+	go s.runHandler(resp)
+}
+
+func (s *subnetWatcher) runHandler(req *types.StoreWatchSubnetsResp) {
+
+	// This is a small codebase currently and we known this cannot be nil. In
+	// the future, if this code is refactored or reused in other contexts, we
+	// may want to add some additional safety checks or validation.
+	defer s.stopWGFn()
 
 	for {
 		select {
 		case err := <-req.ErrorCh:
-			c.logger.Error("error received from subnet watcher", zap.Error(err))
+			s.logger.Error("error received from subnet watcher", zap.Error(err))
 		case set := <-req.ModifyCh:
-			c.handleSubnetSet(set)
+			s.handleSubnetSet(set)
 		case del := <-req.DeleteCh:
-			c.handleSubnetDelete(del)
-		case <-c.shutdownCh:
-			c.logger.Info("shutting down subnet update handler")
+			s.handleSubnetDelete(del)
+		case <-s.shutdownCh:
+			s.logger.Info("shutting down subnet update handler")
+			return
+		case <-s.stopCh:
+			s.logger.Info("stopping subnet update handler")
 			return
 		}
 	}
 }
 
-func (c *Client) handleSubnetDelete(subnets []*types.Subnet) {
+func (s *subnetWatcher) handleSubnetDelete(subnets []*types.Subnet) {
 	for _, subnet := range subnets {
-
-		// We may log more than one message, so caputre the pairs here to avoid
-		// multiple calls to the function and slice allocations.
-		logPairs := subnet.LoggingPairs()
 
 		// If the agent has got an update about itself being expired, the
 		// cluster stability is likely compromised. As the addition is not
-		// hanled here, we simply skip the deletion attempt as it won't because
+		// handled here, we simply skip the deletion attempt as it won't because
 		// we don't add local subnets this way.
-		if subnet.ClientID == c.getID() {
-			c.logger.Warn("received subnet deletion for local client; skipping", logPairs...)
+		if subnet.ClientID == s.cID {
+			s.logger.Warn("received subnet deletion for local client; skipping",
+				subnet.LoggingPairs()...,
+			)
 			continue
 		}
 
-		c.logger.Debug("deleting remote network subnet", logPairs...)
+		s.logger.Debug("deleting remote subnet networking", subnet.LoggingPairs()...)
 
-		_, err := c.networkManager.DeleteRemote(&types.NetworkProviderDeleteRemoteReq{
+		var localSubnets []*types.Subnet
+		if s.localSubnet != nil {
+			localSubnets = []*types.Subnet{s.localSubnet}
+		}
+
+		_, err := s.networkManager.DeleteRemote(&types.NetworkProviderDeleteRemoteReq{
 			Subnet:       subnet,
-			LocalSubnets: c.subnets,
+			LocalSubnets: localSubnets,
 		})
 		if err != nil {
-			c.logger.Error("failed to delete remote network subnet",
-				append(logPairs, zap.Error(err))...,
+			s.logger.Error("failed to delete remote subnet networking",
+				append(subnet.LoggingPairs(), zap.Error(err))...,
 			)
 		} else {
-			c.logger.Info("successfully deleted remote network subnet", logPairs...)
+			s.logger.Info("successfully deleted remote subnet networking", subnet.LoggingPairs()...)
 		}
 	}
 }
 
-func (c *Client) handleSubnetSet(subnets []*types.Subnet) {
+func (s *subnetWatcher) handleSubnetSet(subnets []*types.Subnet) {
 	for _, subnet := range subnets {
 
 		// If the subnet belongs to this host, we do not need to perform the
 		// remote set operation. If we did, it would break the local host subnet
 		// routing.
-		if subnet.ClientID == c.getID() {
+		if subnet.ClientID == s.cID {
 			continue
 		}
 
-		// We may log more than one message, so caputre the pairs here to avoid
-		// multiple calls to the function and slice allocations.
-		logPairs := subnet.LoggingPairs()
+		s.logger.Debug("setting up remote subnet networking", subnet.LoggingPairs()...)
 
-		c.logger.Debug("setting up remote network subnet", logPairs...)
+		var localSubnets []*types.Subnet
+		if s.localSubnet != nil {
+			localSubnets = []*types.Subnet{s.localSubnet}
+		}
 
-		_, err := c.networkManager.SetRemote(&types.NetworkProviderSetRemoteReq{
+		_, err := s.networkManager.SetRemote(&types.NetworkProviderSetRemoteReq{
 			Subnet:       subnet,
-			LocalSubnets: c.subnets,
+			LocalSubnets: localSubnets,
 		})
 		if err != nil {
-			c.logger.Error("failed to set up remote network subnet",
-				append(logPairs, zap.Error(err))...,
+			s.logger.Error("failed to set up remote subnet networking",
+				append(subnet.LoggingPairs(), zap.Error(err))...,
 			)
 		} else {
-			c.logger.Info("successfully set up remote network subnet", logPairs...)
+			s.logger.Info("successfully set up remote subnet networking", subnet.LoggingPairs()...)
 		}
 	}
 }
+
+func (s *subnetWatcher) stop() { s.stopOnce.Do(func() { close(s.stopCh) }) }
