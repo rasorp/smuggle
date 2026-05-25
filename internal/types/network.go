@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,66 @@ func (n *Network) Canonicalize() {
 	if n.IPMasq == nil {
 		n.IPMasq = helper.PointerOf(true)
 	}
+}
+
+// Equals compares two network configurations for equality. The name field is
+// intentionally excluded from the comparison as networks are identified by
+// this field.
+func (n *Network) Equals(other *Network) bool {
+
+	if n == nil && other == nil {
+		return true
+	}
+	if n == nil || other == nil {
+		return false
+	}
+
+	if (n.IPMasq == nil) != (other.IPMasq == nil) {
+		return false
+	}
+	if n.IPMasq != nil && other.IPMasq != nil && *n.IPMasq != *other.IPMasq {
+		return false
+	}
+
+	// Compare IPv4 configuration.
+	if (n.IPv4 == nil) != (other.IPv4 == nil) {
+		return false
+	}
+	if n.IPv4 != nil && other.IPv4 != nil {
+		if (n.IPv4.Network == nil) != (other.IPv4.Network == nil) {
+			return false
+		}
+		if n.IPv4.Network != nil && other.IPv4.Network != nil {
+			if n.IPv4.Network.IP != other.IPv4.Network.IP ||
+				n.IPv4.Network.Size != other.IPv4.Network.Size {
+				return false
+			}
+		}
+		if n.IPv4.Min != other.IPv4.Min {
+			return false
+		}
+		if n.IPv4.Max != other.IPv4.Max {
+			return false
+		}
+		if n.IPv4.Size != other.IPv4.Size {
+			return false
+		}
+	}
+
+	// Compare Provider configuration.
+	if (n.Provider == nil) != (other.Provider == nil) {
+		return false
+	}
+	if n.Provider != nil && other.Provider != nil {
+		if n.Provider.Name != other.Provider.Name {
+			return false
+		}
+		if !bytes.Equal(n.Provider.Config, other.Provider.Config) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // InterfaceName returns the name of the network interface that is used for

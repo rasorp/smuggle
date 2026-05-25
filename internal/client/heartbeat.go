@@ -1,6 +1,7 @@
 package client
 
 import (
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -8,15 +9,35 @@ import (
 	"github.com/rasorp/smuggle/internal/types"
 )
 
-func (c *Client) startHeartbeaters() {
-	for _, subnet := range c.subnets {
-		go c.startSubnetHeartbeat(subnet)
-	}
+// heartbeater is responsible for periodically updating the expiration time
+// of a subnet in the store to indicate that the client is still active and
+// using that subnet.
+type heartbeater struct {
+	logger *zap.Logger
+	store  types.Store
+	subnet *types.Subnet
+
+	// shutdownCh is the client shutdown channel used to indicate that the agent
+	// is shutting down and all long-running processes should exit. This is a
+	// coarse-grained signal.
+	shutdownCh chan struct{}
+
+	// stopCh is used to signal to this specific heartbeater that it should
+	// stop. This allows for more fine-grained control, such as when a subnet is
+	// removed.
+	stopCh chan struct{}
+
+	// stopWGFn is a callback function that should be called when the
+	// heartbeater has fully stopped. This allows for proper coordination of
+	// shutdown processes across the client.
+	stopWGFn func()
+
+	// stopOnce ensures that the stop process is only initiated once, preventing
+	// potential issues from multiple stop signals.
+	stopOnce sync.Once
 }
 
-func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
-	c.shutdownGroup.Add(1)
-	defer c.shutdownGroup.Done()
+func (h *heartbeater) start() {
 
 	// Calculate the heartbeat interval as half of the TTL to ensure we update
 	// before expiration. This provides a safety margin.
@@ -25,14 +46,14 @@ func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
-	// We may log more than one message, so caputre the pairs here to avoid
-	// multiple calls to the function and slice allocations. All fields are
-	// static.
-	logPairs := subnet.LoggingPairs()
-
-	c.logger.Info("starting subnet heartbeat",
-		append(logPairs, zap.String("interval", heartbeatInterval.String()))...,
+	h.logger.Info("starting subnet heartbeat",
+		append(h.subnet.LoggingPairs(), zap.String("interval", heartbeatInterval.String()))...,
 	)
+
+	// This is a small codebase currently and we known this cannot be nil. In
+	// the future, if this code is refactored or reused in other contexts, we
+	// may want to add some additional safety checks or validation.
+	defer h.stopWGFn()
 
 	for {
 		select {
@@ -40,14 +61,10 @@ func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 			// Create a copy of the subnet config to update the expiration time
 			// without modifying the original reference. Then write this update
 			// back to the store.
-			subnetCopy := subnet.Copy()
+			subnetCopy := h.subnet.Copy()
 			subnetCopy.Expiration = time.Now().Add(types.DefaultSubnetTTL)
 
-			c.logger.Debug("updating subnet expiration",
-				append(logPairs, zap.Time("expiration", subnetCopy.Expiration))...,
-			)
-
-			_, err := c.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: subnetCopy})
+			_, err := h.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: subnetCopy})
 
 			// Adjust the ticker interval based on success or failure. On
 			// success, we maintain the regular interval. On failure, we shorten
@@ -60,19 +77,28 @@ func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 			case nil:
 				ticker.Reset(types.DefaultSubnetTTL / 3)
 
-				c.logger.Info("successfully updated subnet expiration",
-					append(logPairs, zap.Time("expiration", subnetCopy.Expiration))...,
+				h.subnet = subnetCopy
+
+				h.logger.Debug("updated subnet expiration",
+					zap.String("network", subnetCopy.NetworkName),
+					zap.Time("new_expiration", subnetCopy.Expiration),
 				)
 			default:
 				ticker.Reset(10 * time.Second)
 
-				c.logger.Error("failed to update subnet expiration",
-					append(logPairs, zap.Error(err))...,
+				h.logger.Error("failed to update subnet expiration",
+					zap.String("network", subnetCopy.NetworkName),
+					zap.Error(err),
 				)
 			}
-		case <-c.shutdownCh:
-			c.logger.Info("shutting down subnet heartbeat", logPairs...)
+		case <-h.shutdownCh:
+			h.logger.Info("shutting down subnet heartbeat", zap.String("network", h.subnet.NetworkName))
+			return
+		case <-h.stopCh:
+			h.logger.Info("stopping subnet heartbeat", zap.String("network", h.subnet.NetworkName))
 			return
 		}
 	}
 }
+
+func (h *heartbeater) stop() { h.stopOnce.Do(func() { close(h.stopCh) }) }

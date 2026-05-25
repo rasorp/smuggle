@@ -53,6 +53,19 @@ func New(logger *zap.Logger) types.NetworkProvider {
 
 func (p *Provider) Name() string { return providerName }
 
+func (p *Provider) DeleteLocal(
+	req *types.NetworkProviderDeleteLocalReq,
+) (*types.NetworkProviderDeleteLocalResp, error) {
+
+	if err := p.deleteIPv4(req.Subnet); err != nil {
+		return nil, err
+	}
+
+	p.logger.Info("successfully deleted local VXLAN interface", req.Subnet.LoggingPairs()...)
+
+	return &types.NetworkProviderDeleteLocalResp{}, nil
+}
+
 func (p *Provider) SetLocal(
 	req *types.NetworkProviderSetReq,
 ) (*types.NetworkProviderSetResp, error) {
@@ -91,7 +104,7 @@ func (p *Provider) SetLocal(
 		return nil, fmt.Errorf("failed to marshal vxlan config: %v", err)
 	}
 
-	p.logger.Info("setup local VXLAN interface", cfg.loggingPairs()...)
+	p.logger.Info("successfully set up local VXLAN interface", cfg.loggingPairs()...)
 
 	// Create a copy of the subnet to avoid mutating the request object and
 	// ensure we don't accidentally modify the caller's data.

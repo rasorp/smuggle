@@ -52,6 +52,18 @@ func NewManager(logger *zap.Logger, intf string) (*Manager, error) {
 	return &m, nil
 }
 
+func (m *Manager) DeleteLocal(
+	req *types.NetworkProviderDeleteLocalReq,
+) (*types.NetworkProviderDeleteLocalResp, error) {
+
+	provider, ok := m.providers[req.Subnet.Provider]
+	if !ok {
+		return nil, fmt.Errorf("unknown network provider %q", req.Subnet.Provider)
+	}
+
+	return provider.DeleteLocal(req)
+}
+
 func (m *Manager) SetLocal(
 	req *types.NetworkProviderSetReq,
 ) (*types.NetworkProviderSetResp, error) {

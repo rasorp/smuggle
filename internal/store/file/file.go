@@ -96,3 +96,12 @@ func (s *CNIStore) Set(cfg *types.CNIConfig) error {
 
 	return nil
 }
+
+func (s *CNIStore) Delete(name string) error {
+	if err := os.Remove(filepath.Join(s.path, name+".conf")); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("failed to delete CNI config file: %w", err)
+		}
+	}
+	return nil
+}

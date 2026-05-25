@@ -70,3 +70,21 @@ func (p *Provider) createIPv4(
 
 	return vxlanLink, nil
 }
+
+// deleteIPv4 deletes the IPv4 interface associated with the provided subnet.
+func (p *Provider) deleteIPv4(cfg *types.Subnet) error {
+
+	link, err := netlink.LinkByName(cfg.InterfaceName())
+	if err != nil {
+		if _, ok := err.(netlink.LinkNotFoundError); ok {
+			return nil
+		}
+		return fmt.Errorf("failed to get vxlan link: %w", err)
+	}
+
+	if err := netlink.LinkDel(link); err != nil {
+		return fmt.Errorf("failed to delete vxlan link: %w", err)
+	}
+
+	return nil
+}

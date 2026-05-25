@@ -5,19 +5,35 @@ package types
 // allow traffic forwarding and masquerading for networks and subnets.
 type Firewall interface {
 
-	// EnsureIsolation ensures that all networks in the provided list are
+	// CreateIsolation ensures that all networks in the provided list are
 	// isolated from each other by adding REJECT rules for cross-network
 	// traffic. This prevents containers on different networks from
 	// communicating with each other.
-	EnsureIsolation([]*Network) error
+	CreateIsolation([]*Network) error
 
-	// SetupForwardRules sets up firewall forwarding rules for the provided
+	// DeleteIsolation removes the isolation rules for the deleted networks,
+	// while keeping the rules for the existing networks intact. It allows the
+	// agent to clean up any rules that are no longer needed after a network is
+	// deleted.
+	DeleteIsolation(exist, deleted []*Network) error
+
+	// CreateForwardRules sets up firewall forwarding rules for the provided
 	// network. This is used to allow traffic to be forwarded between subnets on
 	// the network.
-	SetupForwardRules(*Network) error
+	CreateForwardRules(network *Network) error
 
-	// SetupMasqRules sets up firewall masquerading rules for the provided
+	// DeleteForwardRules deletes firewall forwarding rules for the provided
+	// network. This is used to clean up rules when a network is deleted from
+	// the store.
+	DeleteForwardRules(network *Network) error
+
+	// CreateMasqRules sets up firewall masquerading rules for the provided
 	// network and subnet. This is used to enable NAT for traffic leaving the
 	// subnet to external destinations.
-	SetupMasqRules(*Network, *Subnet) error
+	CreateMasqRules(network *Network, subnet *Subnet) error
+
+	// DeleteMasqRules deletes firewall masquerading rules for the provided
+	// network and subnet. This is used to clean up rules when a subnet is
+	// deleted from the store.
+	DeleteMasqRules(network *Network, subnet *Subnet) error
 }
