@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/rasorp/smuggle/internal/client"
+	"github.com/rasorp/smuggle/internal/client/cni"
 	"github.com/rasorp/smuggle/internal/config"
 	"github.com/rasorp/smuggle/internal/log"
-	"github.com/rasorp/smuggle/internal/store/file"
 )
 
 // NewClientAgent constructs and returns an Agent configured to run the Smuggle
@@ -33,7 +33,7 @@ func NewClientAgent(cfg *config.ClientAgentConfig) (*Agent, error) {
 		Config:   cfg.Client,
 		Logger:   logger,
 		Store:    store,
-		CNIStore: file.NewCNIStore("/opt/smuggle/config"),
+		CNIStore: cni.NewStore("/opt/smuggle/config"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client: %w", err)

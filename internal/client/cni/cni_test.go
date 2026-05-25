@@ -1,32 +1,133 @@
-package file
+package cni
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/shoenig/test/must"
 
+	"github.com/rasorp/smuggle/internal/helper"
 	"github.com/rasorp/smuggle/internal/types"
 )
 
+func TestGenerateCNIConfig(t *testing.T) {
+
+	// Use a test helper that parses a CIDR string into an *IPv4Net, to keep
+	// test data declarations concise.
+	mustIPv4Net := func(cidr string) *types.IPv4Net {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		must.NoError(t, err)
+		n := types.FromIPNet(ipNet)
+		return &n
+	}
+
+	testCases := []struct {
+		name     string
+		network  *types.Network
+		subnet   *types.Subnet
+		expected *Config
+	}{
+		{
+			name: "ipmasq enabled produces correct config",
+			network: &types.Network{
+				Name:   "smuggle",
+				IPMasq: helper.PointerOf(true),
+				IPv4: &types.IPv4Config{
+					Network: mustIPv4Net("10.0.0.0/16"),
+				},
+			},
+			subnet: &types.Subnet{
+				IPv4Network: mustIPv4Net("10.0.1.0/24"),
+				MTU:         1450,
+			},
+			expected: &Config{
+				Name:   "smuggle",
+				Bridge: "smugglebrd0",
+				MTU:    1450,
+				IPMasq: true,
+				IPv4: &IPv4Config{
+					Network: "10.0.0.0/16",
+					Subnet:  "10.0.1.1/24",
+					Gateway: "10.0.1.1",
+				},
+			},
+		},
+		{
+			name: "ipmasq disabled is correctly dereferenced",
+			network: &types.Network{
+				Name:   "smuggle",
+				IPMasq: helper.PointerOf(false),
+				IPv4: &types.IPv4Config{
+					Network: mustIPv4Net("10.0.0.0/16"),
+				},
+			},
+			subnet: &types.Subnet{
+				IPv4Network: mustIPv4Net("10.0.1.0/24"),
+				MTU:         1450,
+			},
+			expected: &Config{
+				Name:   "smuggle",
+				Bridge: "smugglebrd0",
+				MTU:    1450,
+				IPMasq: false,
+				IPv4: &IPv4Config{
+					Network: "10.0.0.0/16",
+					Subnet:  "10.0.1.1/24",
+					Gateway: "10.0.1.1",
+				},
+			},
+		},
+		{
+			name: "bridge name is always network name suffixed with brd0",
+			network: &types.Network{
+				Name:   "prod",
+				IPMasq: helper.PointerOf(true),
+				IPv4: &types.IPv4Config{
+					Network: mustIPv4Net("192.168.0.0/20"),
+				},
+			},
+			subnet: &types.Subnet{
+				IPv4Network: mustIPv4Net("192.168.4.0/24"),
+				MTU:         1500,
+			},
+			expected: &Config{
+				Name:   "prod",
+				Bridge: "prodbrd0",
+				MTU:    1500,
+				IPMasq: true,
+				IPv4: &IPv4Config{
+					Network: "192.168.0.0/20",
+					Subnet:  "192.168.4.1/24",
+					Gateway: "192.168.4.1",
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GenerateCNIConfig(tc.network, tc.subnet)
+			must.Eq(t, tc.expected, result)
+		})
+	}
+}
+
 func Test_NewCNIStore(t *testing.T) {
 	storePath := "/tmp/cni-store"
-	store := NewCNIStore(storePath)
-
-	cniStore, ok := store.(*CNIStore)
-	must.True(t, ok)
-	must.Eq(t, storePath, cniStore.path)
+	store := NewStore(storePath)
+	must.Eq(t, storePath, store.path)
 }
 
 func TestCNIStore_Set(t *testing.T) {
 	testCases := []struct {
 		name                  string
 		storePath             string
-		config                *types.CNIConfig
+		config                *Config
 		setupFunc             func(t *testing.T, storePath string)
-		validateFunc          func(t *testing.T, storePath string, cfg *types.CNIConfig)
+		validateFunc          func(t *testing.T, storePath string, cfg *Config)
 		expectedErrorContains string
 	}{
 		{
@@ -38,17 +139,17 @@ func TestCNIStore_Set(t *testing.T) {
 		{
 			name:      "valid config",
 			storePath: t.TempDir(),
-			config: &types.CNIConfig{
+			config: &Config{
 				Name:   "test-network",
 				MTU:    1450,
 				IPMasq: true,
-				IPv4: &types.IPv4CNIConfig{
+				IPv4: &IPv4Config{
 					Network: "10.0.0.0/16",
 					Subnet:  "10.0.1.1/24",
 					Gateway: "10.0.1.1",
 				},
 			},
-			validateFunc: func(t *testing.T, storePath string, cfg *types.CNIConfig) {
+			validateFunc: func(t *testing.T, storePath string, cfg *Config) {
 
 				// Ensure the file exists on the filesystem.
 				filePath := filepath.Join(storePath, cfg.Name+".conf")
@@ -59,7 +160,7 @@ func TestCNIStore_Set(t *testing.T) {
 				data, err := os.ReadFile(filePath)
 				must.NoError(t, err)
 
-				var readCfg types.CNIConfig
+				var readCfg Config
 				must.NoError(t, json.Unmarshal(data, &readCfg))
 				must.Eq(t, cfg, &readCfg)
 
@@ -72,16 +173,16 @@ func TestCNIStore_Set(t *testing.T) {
 		{
 			name:      "creates parent directory",
 			storePath: filepath.Join(t.TempDir(), "nested", "deeply", "path"),
-			config: &types.CNIConfig{
+			config: &Config{
 				Name:   "nested-network",
 				MTU:    1500,
 				IPMasq: false,
-				IPv4: &types.IPv4CNIConfig{
+				IPv4: &IPv4Config{
 					Network: "172.16.0.0/12",
 					Subnet:  "172.16.1.1/24",
 				},
 			},
-			validateFunc: func(t *testing.T, storePath string, cfg *types.CNIConfig) {
+			validateFunc: func(t *testing.T, storePath string, cfg *Config) {
 				filePath := filepath.Join(storePath, cfg.Name+".conf")
 				must.FileExists(t, filePath)
 
@@ -94,11 +195,11 @@ func TestCNIStore_Set(t *testing.T) {
 		{
 			name:      "existing file",
 			storePath: t.TempDir(),
-			config: &types.CNIConfig{
+			config: &Config{
 				Name:   "overwrite-network",
 				MTU:    1400,
 				IPMasq: true,
-				IPv4: &types.IPv4CNIConfig{
+				IPv4: &IPv4Config{
 					Network: "192.168.0.0/16",
 					Subnet:  "192.168.1.1/24",
 					Gateway: "192.168.1.1",
@@ -106,11 +207,11 @@ func TestCNIStore_Set(t *testing.T) {
 			},
 			setupFunc: func(t *testing.T, storePath string) {
 				// Create an existing file with different content
-				oldCfg := &types.CNIConfig{
+				oldCfg := &Config{
 					Name:   "overwrite-network",
 					MTU:    9000,
 					IPMasq: false,
-					IPv4: &types.IPv4CNIConfig{
+					IPv4: &IPv4Config{
 						Network: "10.0.0.0/8",
 						Subnet:  "10.0.0.1/24",
 					},
@@ -121,12 +222,12 @@ func TestCNIStore_Set(t *testing.T) {
 				filePath := filepath.Join(storePath, oldCfg.Name+".conf")
 				must.NoError(t, os.WriteFile(filePath, data, 0644))
 			},
-			validateFunc: func(t *testing.T, storePath string, cfg *types.CNIConfig) {
+			validateFunc: func(t *testing.T, storePath string, cfg *Config) {
 				filePath := filepath.Join(storePath, cfg.Name+".conf")
 				data, err := os.ReadFile(filePath)
 				must.NoError(t, err)
 
-				var readCfg types.CNIConfig
+				var readCfg Config
 				must.NoError(t, json.Unmarshal(data, &readCfg))
 
 				// Verify new config, not old config
@@ -137,30 +238,30 @@ func TestCNIStore_Set(t *testing.T) {
 		{
 			name:      "multiple configs",
 			storePath: t.TempDir(),
-			config: &types.CNIConfig{
+			config: &Config{
 				Name:   "network-2",
 				MTU:    1450,
 				IPMasq: true,
-				IPv4: &types.IPv4CNIConfig{
+				IPv4: &IPv4Config{
 					Network: "10.1.0.0/16",
 					Subnet:  "10.1.1.1/24",
 				},
 			},
 			setupFunc: func(t *testing.T, storePath string) {
 				// Create first network config
-				cfg1 := &types.CNIConfig{
+				cfg1 := &Config{
 					Name:   "network-1",
 					MTU:    1500,
 					IPMasq: false,
-					IPv4: &types.IPv4CNIConfig{
+					IPv4: &IPv4Config{
 						Network: "10.0.0.0/16",
 						Subnet:  "10.0.1.1/24",
 					},
 				}
-				store := NewCNIStore(storePath)
+				store := NewStore(storePath)
 				must.NoError(t, store.Set(cfg1))
 			},
-			validateFunc: func(t *testing.T, storePath string, cfg *types.CNIConfig) {
+			validateFunc: func(t *testing.T, storePath string, cfg *Config) {
 				// Verify both files exist
 				must.FileExists(t, filepath.Join(storePath, "network-1.conf"))
 				must.FileExists(t, filepath.Join(storePath, "network-2.conf"))
@@ -169,10 +270,10 @@ func TestCNIStore_Set(t *testing.T) {
 		{
 			name:      "path traversal via dotdot segments",
 			storePath: t.TempDir(),
-			config: &types.CNIConfig{
+			config: &Config{
 				Name: "../../etc/cron.d/evil",
 				MTU:  1450,
-				IPv4: &types.IPv4CNIConfig{
+				IPv4: &IPv4Config{
 					Network: "10.0.0.0/16",
 					Subnet:  "10.0.1.1/24",
 				},
@@ -182,10 +283,10 @@ func TestCNIStore_Set(t *testing.T) {
 		{
 			name:      "path traversal via absolute path in name",
 			storePath: t.TempDir(),
-			config: &types.CNIConfig{
+			config: &Config{
 				Name: "/etc/cron.d/evil",
 				MTU:  1450,
-				IPv4: &types.IPv4CNIConfig{
+				IPv4: &IPv4Config{
 					Network: "10.0.0.0/16",
 					Subnet:  "10.0.1.1/24",
 				},
@@ -195,11 +296,11 @@ func TestCNIStore_Set(t *testing.T) {
 		{
 			name:      "read-only directory",
 			storePath: filepath.Join(t.TempDir(), "readonly"),
-			config: &types.CNIConfig{
+			config: &Config{
 				Name:   "readonly-test",
 				MTU:    1450,
 				IPMasq: true,
-				IPv4: &types.IPv4CNIConfig{
+				IPv4: &IPv4Config{
 					Network: "10.0.0.0/16",
 					Subnet:  "10.0.1.1/24",
 				},
@@ -228,7 +329,7 @@ func TestCNIStore_Set(t *testing.T) {
 			}
 
 			// Execute the store function with the passed config.
-			err := NewCNIStore(tc.storePath).Set(tc.config)
+			err := NewStore(tc.storePath).Set(tc.config)
 
 			// Perform the test assertions.
 			if tc.expectedErrorContains != "" {

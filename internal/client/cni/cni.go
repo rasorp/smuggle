@@ -1,4 +1,4 @@
-package file
+package cni
 
 import (
 	"encoding/json"
@@ -10,17 +10,49 @@ import (
 	"github.com/rasorp/smuggle/internal/types"
 )
 
-// CNIFileStore implements the CNIStore interface by writing CNI configurations
-// to a file on disk using atomic write operations.
-type CNIStore struct {
+// Store implements the CNIStore interface by writing CNI configurations to a
+// file on disk using atomic write operations.
+type Store struct {
 	path string
+}
+
+// Config represents a CNI (Container Network Interface) configuration.
+type Config struct {
+	Name   string      `json:"name"`
+	Bridge string      `json:"bridge,omitempty"`
+	MTU    int         `json:"mtu"`
+	IPMasq bool        `json:"ipmasq"`
+	IPv4   *IPv4Config `json:"ipv4"`
+}
+
+// IPv4Config represents IPv4-specific CNI configuration.
+type IPv4Config struct {
+	Network string `json:"network"`
+	Subnet  string `json:"subnet"`
+	Gateway string `json:"gateway,omitempty"`
+}
+
+// GenerateCNIConfig creates a CNI configuration from network and subnet
+// configurations.
+func GenerateCNIConfig(network *types.Network, subnet *types.Subnet) *Config {
+	return &Config{
+		Name:   network.Name,
+		Bridge: network.Name + "brd0",
+		MTU:    subnet.MTU,
+		IPMasq: *network.IPMasq,
+		IPv4: &IPv4Config{
+			Network: network.IPv4.Network.String(),
+			Subnet:  subnet.IPv4Network.NextAddr().String(),
+			Gateway: subnet.IPv4Network.NextAddr().IP.String(),
+		},
+	}
 }
 
 // NewCNIFileStore creates a new CNIFileStore that will write to the specified
 // file path. The path can be absolute or relative, and parent directories will
 // be created if they don't exist.
-func NewCNIStore(path string) types.CNIStore {
-	return &CNIStore{
+func NewStore(path string) *Store {
+	return &Store{
 		path: path,
 	}
 }
@@ -29,7 +61,7 @@ func NewCNIStore(path string) types.CNIStore {
 // The write is atomic by first writing to a temporary file in the same directory,
 // then renaming it to the target file. This ensures that readers never see a
 // partially written file.
-func (s *CNIStore) Set(cfg *types.CNIConfig) error {
+func (s *Store) Set(cfg *Config) error {
 	if cfg == nil {
 		return errors.New("CNI config cannot be nil")
 	}

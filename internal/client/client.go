@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/rasorp/smuggle/internal/client/cni"
 	"github.com/rasorp/smuggle/internal/config"
 	"github.com/rasorp/smuggle/internal/log"
 	"github.com/rasorp/smuggle/internal/network"
@@ -39,7 +40,7 @@ type Client struct {
 	store types.Store
 
 	//
-	cniStore types.CNIStore
+	cniStore *cni.Store
 
 	networkManager *network.Manager
 
@@ -62,7 +63,7 @@ type ClientReq struct {
 	Config   *config.ClientConfig
 	Logger   *zap.Logger
 	Store    types.Store
-	CNIStore types.CNIStore
+	CNIStore *cni.Store
 }
 
 func New(req *ClientReq) (*Client, error) {
@@ -226,7 +227,7 @@ func (c *Client) initSubnet(netCfg *types.Network, cfg *types.Subnet) error {
 		return fmt.Errorf("failed to store client subnet: %w", err)
 	}
 
-	if err := c.cniStore.Set(types.GenerateCNIConfig(netCfg, cfg)); err != nil {
+	if err := c.cniStore.Set(cni.GenerateCNIConfig(netCfg, cfg)); err != nil {
 		return fmt.Errorf("failed to write CNI config: %w", err)
 	}
 
