@@ -11,7 +11,7 @@ import (
 func (c *Client) startSubnetUpdateHandler() error {
 
 	for _, network := range c.networks {
-		c.logger.Debug("starting subnet watcher for network", zap.String("network_name", network.Name))
+		c.logger.Info("starting network subnet watcher", network.LoggingPairs()...)
 
 		req := &types.StoreWatchSubnetsReq{NetworkName: network.Name}
 
@@ -47,29 +47,31 @@ func (c *Client) subnetUpdateHandlerImpl(req *types.StoreWatchSubnetsResp) {
 func (c *Client) handleSubnetDelete(subnets []*types.Subnet) {
 	for _, subnet := range subnets {
 
+		// We may log more than one message, so caputre the pairs here to avoid
+		// multiple calls to the function and slice allocations.
+		logPairs := subnet.LoggingPairs()
+
 		// If the agent has got an update about itself being expired, the
 		// cluster stability is likely compromised. As the addition is not
 		// hanled here, we simply skip the deletion attempt as it won't because
 		// we don't add local subnets this way.
 		if subnet.ClientID == c.getID() {
-			c.logger.Warn("received subnet deletion for local client; skipping",
-				subnet.LoggingPairs()...,
-			)
+			c.logger.Warn("received subnet deletion for local client; skipping", logPairs...)
 			continue
 		}
 
-		c.logger.Debug("deleting remote subnet networking", subnet.LoggingPairs()...)
+		c.logger.Debug("deleting remote network subnet", logPairs...)
 
 		_, err := c.networkManager.DeleteRemote(&types.NetworkProviderDeleteRemoteReq{
 			Subnet:       subnet,
 			LocalSubnets: c.subnets,
 		})
 		if err != nil {
-			c.logger.Error("failed to delete remote subnet networking",
-				append(subnet.LoggingPairs(), zap.Error(err))...,
+			c.logger.Error("failed to delete remote network subnet",
+				append(logPairs, zap.Error(err))...,
 			)
 		} else {
-			c.logger.Info("successfully deleted remote subnet networking", subnet.LoggingPairs()...)
+			c.logger.Info("successfully deleted remote network subnet", logPairs...)
 		}
 	}
 }
@@ -84,18 +86,22 @@ func (c *Client) handleSubnetSet(subnets []*types.Subnet) {
 			continue
 		}
 
-		c.logger.Debug("setting up remote subnet networking", subnet.LoggingPairs()...)
+		// We may log more than one message, so caputre the pairs here to avoid
+		// multiple calls to the function and slice allocations.
+		logPairs := subnet.LoggingPairs()
+
+		c.logger.Debug("setting up remote network subnet", logPairs...)
 
 		_, err := c.networkManager.SetRemote(&types.NetworkProviderSetRemoteReq{
 			Subnet:       subnet,
 			LocalSubnets: c.subnets,
 		})
 		if err != nil {
-			c.logger.Error("failed to set up remote subnet networking",
-				append(subnet.LoggingPairs(), zap.Error(err))...,
+			c.logger.Error("failed to set up remote network subnet",
+				append(logPairs, zap.Error(err))...,
 			)
 		} else {
-			c.logger.Info("successfully set up remote subnet networking", subnet.LoggingPairs()...)
+			c.logger.Info("successfully set up remote network subnet", logPairs...)
 		}
 	}
 }

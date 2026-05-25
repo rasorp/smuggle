@@ -2,148 +2,82 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/hashicorp/nomad/api"
 	"go.uber.org/zap"
 
-	"github.com/rasorp/smuggle/internal/agent/client"
-	"github.com/rasorp/smuggle/internal/agent/server"
 	"github.com/rasorp/smuggle/internal/config"
+	"github.com/rasorp/smuggle/internal/helper/retry"
 	"github.com/rasorp/smuggle/internal/http"
 	"github.com/rasorp/smuggle/internal/log"
-	"github.com/rasorp/smuggle/internal/store/file"
-	"github.com/rasorp/smuggle/internal/store/nvar"
-	"github.com/rasorp/smuggle/internal/types"
 	"github.com/rasorp/smuggle/internal/version"
 )
 
-// Agent coordinates reading subnet configurations from storage
-// and writing CNI configurations to disk.
+// Agent holds the long-running lifecycle logic common to both the server and
+// client commands.
 type Agent struct {
-	cfg    *config.AgentConfig
-	logger *zap.Logger
-
+	logger     *zap.Logger
 	httpServer *http.Server
-
-	client *client.Client
-	server *server.Server
+	start      func() error
+	stop       func() error
 }
 
-// NewAgent creates a new Agent with the provided stores.
-func New(cfg *config.AgentConfig) (*Agent, error) {
+// AgentReq is the configuration used to construct a new Agent.
+type AgentReq struct {
+	Logger     *zap.Logger
+	HTTPConfig *config.HTTPConfig
 
-	logger, err := log.New(cfg.Log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create logger: %w", err)
-	}
+	// Start is an optional function called by Agent.Start before the HTTP
+	// server is started.
+	Start func() error
 
-	a := Agent{
-		cfg:    cfg,
-		logger: logger.Named(log.ComponentNameAgent),
-	}
-
-	if cfg.HTTP != nil && cfg.HTTP.Enabled != nil && *cfg.HTTP.Enabled {
-		a.httpServer = http.New(cfg.HTTP, logger)
-	}
-
-	if cfg.Client.IsEnabled() {
-		if err := a.setupClient(); err != nil {
-			return nil, fmt.Errorf("failed to setup client: %w", err)
-		}
-	}
-	if cfg.Server.IsEnabled() {
-		if err := a.setupServer(); err != nil {
-			return nil, fmt.Errorf("failed to setup server: %w", err)
-		}
-	}
-
-	return &a, nil
+	// Stop is called by Agent.Stop after the HTTP server has been shut down.
+	Stop func() error
 }
 
-func (a *Agent) setupClient() error {
-
-	store, err := a.setupStore()
-	if err != nil {
-		return fmt.Errorf("failed to setup store: %w", err)
+// New constructs an Agent from the provided AgentReq. If HTTP is enabled in
+// the configuration, the HTTP server is set up and will be started/stopped as
+// part of the agent lifecycle.
+func New(req *AgentReq) (*Agent, error) {
+	if req.Logger == nil {
+		return nil, errors.New("logger is required")
 	}
 
-	clientReq := &client.ClientReq{
-		Config:   a.cfg.Client,
-		CNIStore: file.NewCNIStore("/opt/smuggle/config"),
-		Logger:   a.logger,
-		Store:    store,
+	a := &Agent{
+		logger: req.Logger.Named(log.ComponentNameAgent),
+		start:  req.Start,
+		stop:   req.Stop,
 	}
 
-	cl, err := client.New(clientReq)
-	if err != nil {
-		return err
+	if req.HTTPConfig != nil && req.HTTPConfig.Enabled != nil && *req.HTTPConfig.Enabled {
+		a.httpServer = http.New(req.HTTPConfig, req.Logger)
 	}
 
-	a.client = cl
-	return nil
+	return a, nil
 }
 
-func (a *Agent) setupServer() error {
-
-	store, err := a.setupStore()
-	if err != nil {
-		return fmt.Errorf("failed to setup store: %w", err)
-	}
-
-	serverReq := &server.ServerReq{
-		Config: a.cfg.Server,
-		Logger: a.logger,
-		Store:  store,
-	}
-
-	server, err := server.New(serverReq)
-	if err != nil {
-		return err
-	}
-
-	a.server = server
-	return nil
-}
-
-func (a *Agent) setupStore() (types.Store, error) {
-
-	nomadClient, err := a.setupNomadClient()
-	if err != nil {
-		return nil, err
-	}
-
-	switch a.cfg.Store.Backend {
-	case "nvar":
-		return nvar.New(nomadClient, a.cfg.Store.NVar.Path), nil
-	default:
-		return nil, fmt.Errorf("unsupported store backend: %q", a.cfg.Store.Backend)
-	}
-}
-
+// Start runs the optional start hook, then brings up the HTTP server (if
+// configured), and finally logs the startup banner.
 func (a *Agent) Start() error {
+	if a.start != nil {
+		if err := a.start(); err != nil {
+			return fmt.Errorf("failed to start agent: %w", err)
+		}
+	}
 
-	if a.client != nil {
-		if err := a.client.Start(); err != nil {
-			return fmt.Errorf("failed to start client: %w", err)
-		}
-	}
-	if a.server != nil {
-		if err := a.server.Start(); err != nil {
-			return fmt.Errorf("failed to start server: %w", err)
-		}
-	}
 	if a.httpServer != nil {
 		if err := a.httpServer.Start(); err != nil {
 			return fmt.Errorf("failed to start HTTP server: %w", err)
 		}
 	}
 
-	// Log startup information as it's useful for debugging and general
-	// operational visibility.
-	a.logger.Info("started agent",
+	a.logger.Info("started",
 		zap.String("version", version.Get()),
 		zap.String("build_commit", version.BuildCommit),
 		zap.String("build_time", version.BuildTime),
@@ -152,35 +86,49 @@ func (a *Agent) Start() error {
 	return nil
 }
 
+// Stop shuts down the HTTP server (if present) and then calls the stop
+// function supplied at construction time.
 func (a *Agent) Stop() error {
+
+	// If the HTTP server is enabled, we attempt to gracefully shutdown with a
+	// timeout context. If the shutdown fails, we log the error but continue with
+	// the rest of the shutdown process to avoid leaving the agent in a broken
+	// state.
+	//
+	// In the future, we may want to consider more robust error handling here,
+	// such as retrying the shutdown or escalating the error. For now, the HTTP
+	// server only exposes a health check endpoint and does not manage critical
+	// resources, so we prioritize ensuring the rest of the shutdown process
+	// completes.
 	if a.httpServer != nil {
-		if err := a.httpServer.Shutdown(context.Background()); err != nil {
+
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := a.httpServer.Shutdown(timeoutCtx); err != nil {
 			a.logger.Error("failed to gracefully shutdown HTTP server", zap.Error(err))
 		}
 	}
-	if a.client != nil {
-		if err := a.client.Stop(); err != nil {
-			a.logger.Error("failed to gracefully shutdown client", zap.Error(err))
+
+	if a.stop != nil {
+		if err := a.stop(); err != nil {
+			return fmt.Errorf("failed to stop agent: %w", err)
 		}
 	}
-	if a.server != nil {
-		if err := a.server.Stop(); err != nil {
-			a.logger.Error("failed to gracefully shutdown server", zap.Error(err))
-		}
-	}
+
 	return nil
 }
 
+// WaitForSignal blocks until SIGTERM, SIGINT, or SIGHUP is received. On SIGHUP
+// it logs that configuration reload is not yet implemented. On all other
+// signals it calls Stop and returns.
 func (a *Agent) WaitForSignal() {
-
 	signalCh := make(chan os.Signal, 3)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 
 	a.logger.Info("signal notification handler running")
 
-	// Wait to receive a signal. This blocks until we are notified.
 	for {
-
 		sig := <-signalCh
 		a.logger.Info("received notification signal", zap.String("signal", sig.String()))
 
@@ -188,13 +136,38 @@ func (a *Agent) WaitForSignal() {
 		case syscall.SIGHUP:
 			a.logger.Info("SIGHUP received, configuration reload not yet implemented")
 		default:
-			a.logger.Info("shutting down agent")
+			a.logger.Info("shutting down")
 			if err := a.Stop(); err != nil {
-				a.logger.Error("failed to gracefully shutdown agent", zap.Error(err))
+				a.logger.Error("failed to gracefully shutdown", zap.Error(err))
 			} else {
-				a.logger.Info("successfully shutdown agent")
+				a.logger.Info("successfully shutdown")
 			}
 			return
 		}
 	}
+}
+
+// generateNomadClient creates a Nomad API client from the provided
+// configuration and verifies connectivity by pinging the API with retries.
+func generateNomadClient(cfg *config.NomadConfig, logger *zap.Logger) (*api.Client, error) {
+
+	nomadClient, err := config.NomadClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Nomad client: %w", err)
+	}
+
+	// Verify connectivity to the Nomad API with retries, as the agent may be
+	// starting up before the API is available. We use the Leader endpoint as a
+	// simple and lightweight.
+	if err := retry.Retry(func() error {
+		_, err := nomadClient.Status().Leader()
+		if err != nil {
+			logger.Warn("failed to ping the Nomad API", zap.Error(err))
+		}
+		return err
+	}); err != nil {
+		return nil, fmt.Errorf("failed to connect to Nomad: %w", err)
+	}
+
+	return nomadClient, nil
 }

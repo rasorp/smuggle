@@ -1,93 +1,38 @@
-# Configuration: Agent
-The Smuggle agent supports configuration through command-line flags,
+# Configuration: Server
+The Smuggle server supports configuration through command-line flags,
 environment variables, and configuration files in HCL or JSON format.
 
 The `config` flag can be used multiple times to load configuration files. Once
 all files have been parsed and merged, command-line flags and environment
-variables are applied last to override any default value sand settings from the
+variables are applied last to override any default values and settings from the
 files.
 
-## Client
-Client mode manages local host networking, VXLAN interfaces, and CNI
-configurations.
-
-### Options
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable client functionality |
-| `data_dir` | string | `/var/lib/smuggle/client` | Directory for client data (CNI configs, agent ID) |
-| `disable_ipmasq` | bool | `false` | Disable IP masquerading for container traffic |
-| `network_interface` | string | auto-detected | Network interface to use for VXLAN tunnels |
-
-### Command-Line Flags
-```bash
---client-enabled
---client-data-dir=/path/to/dir
---client-disable-ipmasq
---client-network-interface=eth0
-```
-
-### Environment Variables
-```bash
-SMUGGLE_CLIENT_ENABLED=true
-SMUGGLE_CLIENT_DATA_DIR=/var/lib/smuggle/client
-SMUGGLE_CLIENT_DISABLE_IPMASQ=true
-SMUGGLE_CLIENT_NETWORK_INTERFACE=eth0
-```
-
-### Configuration File
-**HCL:**
-```hcl
-client {
-  enabled           = true
-  data_dir          = "/var/lib/smuggle/client"
-  disable_ipmasq    = false
-  network_interface = "eth0"
-}
-```
-
-**JSON:**
-```json
-{
-  "client": {
-    "enabled": true,
-    "data_dir": "/var/lib/smuggle/client",
-    "disable_ipmasq": false,
-    "network_interface": "eth0"
-  }
-}
-```
-
 ## Server
-Server mode runs centralized tasks for the Smuggle cluster.
+The server runs centralised tasks for the Smuggle cluster, including reaping
+expired subnets.
 
 ### Options
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable server functionality |
 | `reaper.interval` | duration | `5m` | Interval between reaper runs |
 | `reaper.threshold` | duration | `5m` | Age threshold for removing expired subnets |
 
 ### Command-Line Flags
 ```bash
---server-enabled
---server-reaper-interval=10m
---server-reaper-threshold=15m
+--reaper-interval=10m
+--reaper-threshold=15m
 ```
 
 ### Environment Variables
 ```bash
-SMUGGLE_SERVER_ENABLED=true
-SMUGGLE_SERVER_REAPER_INTERVAL=10m
-SMUGGLE_SERVER_REAPER_THRESHOLD=15m
+SMUGGLE_REAPER_INTERVAL=10m
+SMUGGLE_REAPER_THRESHOLD=15m
 ```
 
 ### Configuration File
 **HCL:**
 ```hcl
 server {
-  enabled = true
-  
   reaper {
     interval  = "10m"
     threshold = "15m"
@@ -99,7 +44,6 @@ server {
 ```json
 {
   "server": {
-    "enabled": true,
     "reaper": {
       "interval": "10m",
       "threshold": "15m"
@@ -164,7 +108,7 @@ http {
 ```
 
 ## Logging
-Configure the agent log output format and verbosity.
+Configure the server log output format and verbosity.
 
 ### Options
 | Option | Type | Default | Description |
@@ -178,7 +122,7 @@ Configure the agent log output format and verbosity.
 ### Command-Line Flags
 ```bash
 --log-level=debug
---log-file=/var/log/smuggle/agent.log
+--log-file=/var/log/smuggle/server.log
 --log-json
 --log-include-line
 --log-enable-stacktrace
@@ -187,7 +131,7 @@ Configure the agent log output format and verbosity.
 ### Environment Variables
 ```bash
 SMUGGLE_LOG_LEVEL=debug
-SMUGGLE_LOG_FILE=/var/log/smuggle/agent.log
+SMUGGLE_LOG_FILE=/var/log/smuggle/server.log
 SMUGGLE_LOG_JSON=true
 SMUGGLE_LOG_INCLUDE_LINE=true
 SMUGGLE_LOG_ENABLE_STACKTRACE=true
@@ -198,7 +142,7 @@ SMUGGLE_LOG_ENABLE_STACKTRACE=true
 ```hcl
 log {
   level             = "debug"
-  file              = "/var/log/smuggle/agent.log"
+  file              = "/var/log/smuggle/server.log"
   json              = false
   include_line      = true
   enable_stacktrace = false
@@ -210,7 +154,7 @@ log {
 {
   "log": {
     "level": "debug",
-    "file": "/var/log/smuggle/agent.log",
+    "file": "/var/log/smuggle/server.log",
     "json": false,
     "include_line": true,
     "enable_stacktrace": false
@@ -219,8 +163,8 @@ log {
 ```
 
 ## Nomad
-Configure connection to the Nomad cluster. This is used for read network
-configurations and client subnet configurations.
+Configure connection to the Nomad cluster. This is used to read network
+configurations and manage subnet allocations.
 
 ### Options
 | Option | Type | Default | Description |
@@ -287,12 +231,10 @@ nomad {
 ```
 
 ## Store
-Configure backend for reading network configuration data and writing client
-subnet allocations. Currently, only Nomad Variables (`nvar`) backend is
-supported.
+Configure the backend for reading network configuration data and managing subnet
+allocations. Currently, only Nomad Variables (`nvar`) backend is supported.
 
 ### Options
-
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `backend` | string | `nvar` | Storage backend type (currently only `nvar`) |
@@ -315,7 +257,7 @@ SMUGGLE_STORE_NVAR_PATH=smuggle/
 ```hcl
 store {
   backend = "nvar"
-  
+
   nvar {
     path = "smuggle/"
   }

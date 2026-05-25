@@ -8,8 +8,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/rasorp/smuggle/internal/cmd/agent"
+	"github.com/rasorp/smuggle/internal/cmd/client"
 	"github.com/rasorp/smuggle/internal/cmd/network"
+	"github.com/rasorp/smuggle/internal/cmd/server"
 	clihelp "github.com/rasorp/smuggle/internal/helper/cli"
 	"github.com/rasorp/smuggle/internal/version"
 )
@@ -27,8 +28,9 @@ func main() {
 
 	cliApp := cli.Command{
 		Commands: []*cli.Command{
-			agent.Command(),
+			client.Command(),
 			network.Command(),
+			server.Command(),
 		},
 		Name:  "smuggle",
 		Usage: "Layer 3 network fabric for IBM HashiCorp Nomad",

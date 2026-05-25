@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,7 +50,7 @@ type Client struct {
 	//
 	subnets []*types.Subnet
 
-	// shtutdownCh is used to signal to all client processes that the agent is
+	// shutdownCh is used to signal to all client processes that the agent is
 	// shutting down. All long-running processes should monitor this channel and
 	// use the shutdownGroup wait group to ensure the agent does not exit before
 	// they have completed.
@@ -242,7 +241,7 @@ func (c *Client) generateID() error {
 	// Try to read existing ID from file
 	data, err := os.ReadFile(idFilePath)
 	if err == nil {
-		id := strings.TrimSpace(string(data))
+		id := string(data)
 		if id != "" {
 			c.id.Store(id)
 			return nil

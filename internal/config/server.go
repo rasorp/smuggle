@@ -1,22 +1,22 @@
 package config
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/hashicorp/hcl/v2/gohcl"
+	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/urfave/cli/v3"
-
-	"github.com/rasorp/smuggle/internal/helper"
 )
 
 const (
-	serverEnabledFlag         = "server-enabled"
-	serverReaperIntervalFlag  = "server-reaper-interval"
-	serverReaperThresholdFlag = "server-reaper-threshold"
+	reaperIntervalFlag  = "reaper-interval"
+	reaperThresholdFlag = "reaper-threshold"
 )
 
 type ServerConfig struct {
-	Enabled *bool `hcl:"enabled,optional" json:"enabled"`
-
 	Reaper *ReaperConfig `hcl:"reaper,block" json:"reaper"`
 }
 
@@ -54,15 +54,12 @@ func (r *ReaperConfig) Parse() error {
 
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
-		Enabled: helper.PointerOf(false),
 		Reaper: &ReaperConfig{
 			Interval:  5 * time.Minute,
 			Threshold: 5 * time.Minute,
 		},
 	}
 }
-
-func (s *ServerConfig) IsEnabled() bool { return s != nil && s.Enabled != nil && *s.Enabled }
 
 func (s *ServerConfig) Merge(other *ServerConfig) *ServerConfig {
 	if s == nil {
@@ -74,9 +71,6 @@ func (s *ServerConfig) Merge(other *ServerConfig) *ServerConfig {
 
 	result := *s
 
-	if other.Enabled != nil {
-		result.Enabled = other.Enabled
-	}
 	if other.Reaper != nil {
 		if result.Reaper == nil {
 			result.Reaper = &ReaperConfig{}
@@ -98,50 +92,188 @@ func (s *ServerConfig) Merge(other *ServerConfig) *ServerConfig {
 }
 
 func (s *ServerConfig) Validate() []error {
-
-	if !s.IsEnabled() {
-		return nil
-	}
-
 	var errs []error
 	return errs
 }
 
 func ServerConfigCommandFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.BoolFlag{
-			HideDefault: true,
-			Name:        serverEnabledFlag,
-			Usage:       "Enable the Smuggle server functionality",
-			Sources:     cli.EnvVars("SMUGGLE_SERVER_ENABLED"),
-		},
 		&cli.DurationFlag{
 			HideDefault: true,
-			Name:        serverReaperIntervalFlag,
+			Name:        reaperIntervalFlag,
 			Usage:       "Interval between runs of the server reaper",
-			Sources:     cli.EnvVars("SMUGGLE_SERVER_REAPER_INTERVAL"),
+			Sources:     cli.EnvVars("SMUGGLE_REAPER_INTERVAL"),
 		},
 		&cli.DurationFlag{
 			HideDefault: true,
-			Name:        serverReaperThresholdFlag,
+			Name:        reaperThresholdFlag,
 			Usage:       "Duration after which inactive clients are reaped",
-			Sources:     cli.EnvVars("SMUGGLE_SERVER_REAPER_THRESHOLD"),
+			Sources:     cli.EnvVars("SMUGGLE_REAPER_THRESHOLD"),
 		},
 	}
 }
 
 func ServerConfigFromCommand(cmd *cli.Command) *ServerConfig {
 	return &ServerConfig{
-		Enabled: func() *bool {
-			if cmd.IsSet(serverEnabledFlag) {
-				val := cmd.Bool(serverEnabledFlag)
-				return &val
-			}
-			return nil
-		}(),
 		Reaper: &ReaperConfig{
-			Interval:  cmd.Duration(serverReaperIntervalFlag),
-			Threshold: cmd.Duration(serverReaperThresholdFlag),
+			Interval:  cmd.Duration(reaperIntervalFlag),
+			Threshold: cmd.Duration(reaperThresholdFlag),
 		},
 	}
+}
+
+// ServerAgentConfig is the top-level configuration for the Smuggle server
+// agent, combining the server sub-config with shared infrastructure config.
+type ServerAgentConfig struct {
+	HTTP   *HTTPConfig   `hcl:"http,block" json:"http"`
+	Log    *LogConfig    `hcl:"log,block" json:"log"`
+	Nomad  *NomadConfig  `hcl:"nomad,block" json:"nomad"`
+	Server *ServerConfig `hcl:"server,block" json:"server"`
+	Store  *StoreConfig  `hcl:"store,block" json:"store"`
+}
+
+func DefaultServerAgentConfig() *ServerAgentConfig {
+	return &ServerAgentConfig{
+		HTTP:   DefaultHTTPConfig(),
+		Log:    DefaultLogConfig(),
+		Nomad:  DefaultNomadConfig(),
+		Server: DefaultServerConfig(),
+		Store:  DefaultStoreConfig(),
+	}
+}
+
+func (s *ServerAgentConfig) Merge(other *ServerAgentConfig) *ServerAgentConfig {
+	if s == nil {
+		return other
+	}
+	if other == nil {
+		return s
+	}
+
+	result := *s
+
+	result.HTTP = result.HTTP.Merge(other.HTTP)
+	result.Log = result.Log.Merge(other.Log)
+	result.Nomad = result.Nomad.Merge(other.Nomad)
+	result.Server = result.Server.Merge(other.Server)
+	result.Store = result.Store.Merge(other.Store)
+
+	return &result
+}
+
+func (s *ServerAgentConfig) Validate() []error {
+	var errs []error
+
+	errs = append(errs, s.HTTP.Validate()...)
+	errs = append(errs, s.Log.Validate()...)
+	errs = append(errs, s.Nomad.Validate()...)
+	errs = append(errs, s.Server.Validate()...)
+	errs = append(errs, s.Store.Validate()...)
+
+	return errs
+}
+
+func ServerAgentConfigCommandFlags() []cli.Flag {
+	flags := []cli.Flag{
+		&cli.StringSliceFlag{
+			Name:  "config",
+			Usage: "The path to a configuration file to load",
+		},
+	}
+	flags = append(flags, HTTPConfigCommandFlags()...)
+	flags = append(flags, LogConfigCommandFlags()...)
+	flags = append(flags, NomadConfigCommandFlags()...)
+	flags = append(flags, ServerConfigCommandFlags()...)
+	flags = append(flags, StoreConfigCommandFlags()...)
+	return flags
+}
+
+func ServerAgentConfigFromCommand(cmd *cli.Command) *ServerAgentConfig {
+	return &ServerAgentConfig{
+		HTTP:   HTTPConfigFromCommand(cmd),
+		Log:    LogConfigFromCommand(cmd),
+		Nomad:  NomadConfigFromCommand(cmd),
+		Server: ServerConfigFromCommand(cmd),
+		Store:  StoreConfigFromCommand(cmd),
+	}
+}
+
+func ServerAgentConfigFromFiles(cmd *cli.Command) (*ServerAgentConfig, error) {
+	var cfg *ServerAgentConfig
+
+	for _, file := range cmd.StringSlice("config") {
+		fileCfg, err := parseServerAgentConfigFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse config file %q: %w", file, err)
+		}
+		cfg = cfg.Merge(fileCfg)
+	}
+
+	return cfg, nil
+}
+
+func parseServerAgentConfigFile(path string) (*ServerAgentConfig, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
+	switch filepath.Ext(absPath) {
+	case ".json":
+		return parseServerAgentConfigJSONFile(absPath)
+	case ".hcl":
+		return parseServerAgentConfigHCLFile(absPath)
+	default:
+		return nil, fmt.Errorf("unsupported config file format: %q", filepath.Ext(absPath))
+	}
+}
+
+func parseServerAgentConfigHCLFile(path string) (*ServerAgentConfig, error) {
+	parser := hclparse.NewParser()
+
+	f, diags := parser.ParseHCLFile(path)
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("failed to parse HCL file: %w", diags)
+	}
+
+	var resp ServerAgentConfig
+	diags = gohcl.DecodeBody(f.Body, nil, &resp)
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("failed to decode HCL: %w", diags)
+	}
+
+	if resp.Server != nil && resp.Server.Reaper != nil {
+		if err := resp.Server.Reaper.Parse(); err != nil {
+			return nil, fmt.Errorf("failed to parse server config: %w", err)
+		}
+	}
+
+	return &resp, nil
+}
+
+func parseServerAgentConfigJSONFile(path string) (*ServerAgentConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JSON file: %w", err)
+	}
+
+	parser := hclparse.NewParser()
+	f, diags := parser.ParseJSON(data, path)
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("failed to parse JSON file: %w", diags)
+	}
+
+	var resp ServerAgentConfig
+	diags = gohcl.DecodeBody(f.Body, nil, &resp)
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("failed to decode JSON: %w", diags)
+	}
+
+	if resp.Server != nil && resp.Server.Reaper != nil {
+		if err := resp.Server.Reaper.Parse(); err != nil {
+			return nil, fmt.Errorf("failed to parse server config: %w", err)
+		}
+	}
+
+	return &resp, nil
 }

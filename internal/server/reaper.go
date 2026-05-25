@@ -12,6 +12,8 @@ func (s *Server) startNetworkReaper() {
 	s.shutdownGroup.Add(1)
 	defer s.shutdownGroup.Done()
 
+	s.logger.Info("starting down network reaper")
+
 	// Perform an initial run of the reaper on startup, so we don't have to wait
 	// for the first interval to elapse.
 	s.networkReaper()
@@ -44,39 +46,45 @@ func (s *Server) networkReaper() {
 	}
 
 	for _, network := range networks.Networks {
-		s.runSubnetReap(network)
+		s.reapNetworkSubnets(network)
 	}
 }
 
-func (s *Server) runSubnetReap(net *types.Network) {
-	s.logger.Info("running subnet reaper", zap.String("network", net.Name))
+func (s *Server) reapNetworkSubnets(net *types.Network) {
+
+	// We may log more than one message, so caputre the pairs here to avoid
+	// multiple calls to the function and slice allocations.
+	logPairs := net.LoggingPairs()
+
+	s.logger.Info("running network subnet reaper", logPairs...)
 
 	req := types.StoreListSubnetsReq{Network: net.Name}
 
 	subnetsResp, err := s.store.ListSubnets(&req)
 	if err != nil {
-		s.logger.Error("failed to list subnets for reaping",
-			zap.String("network", net.Name),
-			zap.Error(err),
-		)
+		s.logger.Error("failed to list network subnets for reaping",
+			append(logPairs, zap.Error(err))...)
 		return
 	}
 
-	s.logger.Info("successfully listed subnets for reaping",
-		zap.String("network", net.Name),
-		zap.Int("num", len(subnetsResp.Subnets)),
-	)
+	s.logger.Info("successfully listed network subnets for reaping",
+		append(logPairs, zap.Int("subnet_num", len(subnetsResp.Subnets)))...)
 
 	now := time.Now()
 
 	for _, subnet := range subnetsResp.Subnets {
 
-		//
-		if subnet.Expired && subnet.Expiration.Add(s.cfg.Reaper.Threshold).Before(now) {
-			s.handleSubnetExpired(subnet)
+		// If the subnet is already marked as expired, check if it has been
+		// expired for long enough to be deleted.
+		if subnet.Expired {
+			if subnet.Expiration.Add(s.cfg.Reaper.Threshold).Before(now) {
+				s.handleSubnetExpired(subnet)
+			}
 			continue
 		}
 
+		// If the subnet is not marked as expired, but its expiration time has
+		// passed, mark it as expired.
 		if subnet.Expiration.Before(now) {
 			s.handleSubnetExpiration(subnet)
 			continue
@@ -85,6 +93,12 @@ func (s *Server) runSubnetReap(net *types.Network) {
 }
 
 func (s *Server) handleSubnetExpired(subnet *types.Subnet) {
+
+	// We may log more than one message, so caputre the pairs here to avoid
+	// multiple calls to the function and slice allocations.
+	logPairs := subnet.LoggingPairs()
+
+	s.logger.Debug("deleting expired subnet", logPairs...)
 
 	req := types.StoreDeleteSubnetReq{
 		ID:          subnet.ClientID,
@@ -96,15 +110,19 @@ func (s *Server) handleSubnetExpired(subnet *types.Subnet) {
 	// and has been removed from cluster host routing, so this is just cleanup.
 	_, err := s.store.DeleteSubnet(&req)
 	if err != nil {
-		s.logger.Error("failed to delete expired subnet",
-			append(subnet.LoggingPairs(), zap.Error(err))...,
-		)
+		s.logger.Error("failed to delete expired subnet", append(logPairs, zap.Error(err))...)
 	} else {
-		s.logger.Info("successfully deleted expired subnet", subnet.LoggingPairs()...)
+		s.logger.Info("successfully deleted expired subnet", logPairs...)
 	}
 }
 
 func (s *Server) handleSubnetExpiration(subnet *types.Subnet) {
+
+	// We may log more than one message, so caputre the pairs here to avoid
+	// multiple calls to the function and slice allocations.
+	logPairs := subnet.LoggingPairs()
+
+	s.logger.Debug("marking subnet as expired", logPairs...)
 
 	subnet.Expired = true
 
@@ -114,10 +132,8 @@ func (s *Server) handleSubnetExpiration(subnet *types.Subnet) {
 	// again on the next run.
 	_, err := s.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: subnet})
 	if err != nil {
-		s.logger.Error("failed to mark subnet as expired",
-			append(subnet.LoggingPairs(), zap.Error(err))...,
-		)
+		s.logger.Error("failed to mark subnet as expired", append(logPairs, zap.Error(err))...)
 	} else {
-		s.logger.Info("successfully marked subnet as expired", subnet.LoggingPairs()...)
+		s.logger.Info("successfully marked subnet as expired", logPairs...)
 	}
 }

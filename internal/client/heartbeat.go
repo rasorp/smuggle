@@ -14,7 +14,7 @@ func (c *Client) startHeartbeaters() {
 	}
 }
 
-func (c *Client) startSubnetHeartbeat(cfg *types.Subnet) {
+func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 	c.shutdownGroup.Add(1)
 	defer c.shutdownGroup.Done()
 
@@ -25,8 +25,13 @@ func (c *Client) startSubnetHeartbeat(cfg *types.Subnet) {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
+	// We may log more than one message, so caputre the pairs here to avoid
+	// multiple calls to the function and slice allocations. All fields are
+	// static.
+	logPairs := subnet.LoggingPairs()
+
 	c.logger.Info("starting subnet heartbeat",
-		append(cfg.LoggingPairs(), zap.String("interval", heartbeatInterval.String()))...,
+		append(logPairs, zap.String("interval", heartbeatInterval.String()))...,
 	)
 
 	for {
@@ -35,10 +40,14 @@ func (c *Client) startSubnetHeartbeat(cfg *types.Subnet) {
 			// Create a copy of the subnet config to update the expiration time
 			// without modifying the original reference. Then write this update
 			// back to the store.
-			cfgCopy := cfg.Copy()
-			cfgCopy.Expiration = time.Now().Add(types.DefaultSubnetTTL)
+			subnetCopy := subnet.Copy()
+			subnetCopy.Expiration = time.Now().Add(types.DefaultSubnetTTL)
 
-			_, err := c.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: cfgCopy})
+			c.logger.Debug("updating subnet expiration",
+				append(logPairs, zap.Time("expiration", subnetCopy.Expiration))...,
+			)
+
+			_, err := c.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: subnetCopy})
 
 			// Adjust the ticker interval based on success or failure. On
 			// success, we maintain the regular interval. On failure, we shorten
@@ -51,20 +60,18 @@ func (c *Client) startSubnetHeartbeat(cfg *types.Subnet) {
 			case nil:
 				ticker.Reset(types.DefaultSubnetTTL / 3)
 
-				c.logger.Debug("updated subnet expiration",
-					zap.String("network", cfg.NetworkName),
-					zap.Time("expiration", cfgCopy.Expiration),
+				c.logger.Info("successfully updated subnet expiration",
+					append(logPairs, zap.Time("expiration", subnetCopy.Expiration))...,
 				)
 			default:
 				ticker.Reset(10 * time.Second)
 
 				c.logger.Error("failed to update subnet expiration",
-					zap.String("network", cfg.NetworkName),
-					zap.Error(err),
+					append(logPairs, zap.Error(err))...,
 				)
 			}
 		case <-c.shutdownCh:
-			c.logger.Info("shutting down subnet heartbeat", zap.String("network", cfg.NetworkName))
+			c.logger.Info("shutting down subnet heartbeat", logPairs...)
 			return
 		}
 	}

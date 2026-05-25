@@ -6,7 +6,15 @@ to set up a local development cluster.
 
 > **Note**
 Smuggle in client mode only supports Linux clients and requires root privileges
-to run.
+to run. The server can run on any platform supported by Go.
+
+## Commands
+Smuggle exposes two long-running commands:
+
+- `smuggle client run` — runs on every Nomad client node, managing host
+  networking, VXLAN interfaces, and CNI configurations.
+- `smuggle server run` — runs once per cluster, handling centralised tasks
+  such as reaping expired subnets.
 
 ## Install Smuggle
 Smuggle and the Smuggle CNI plugin can be installed either by building from

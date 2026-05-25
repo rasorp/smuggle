@@ -13,11 +13,9 @@ import (
 type Server struct {
 	cfg    *config.ServerConfig
 	logger *log.Logger
+	store  types.Store
 
-	// store
-	store types.Store
-
-	// shtutdownCh is used to signal to all server processes that the agent is
+	// shutdownCh is used to signal to all server processes that the agent is
 	// shutting down. All long-running processes should monitor this channel and
 	// use the shutdownGroup wait group to ensure the agent does not exit before
 	// they have completed.

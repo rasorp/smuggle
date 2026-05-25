@@ -6,7 +6,8 @@ API, and configuration options.
 - [Architecture](./_architecture.md)
 - [Getting Started](./_getting_started.md)
 - Configuration Options
-  - [Agent](./config_agent.md)
+  - [Client](./config_client.md)
+  - [Server](./config_server.md)
   - [CNI Plugin](./config_cni.md)
   - [Network](./config_network.md)
   - [Network Provider VXLAN](./config_network_vxlan.md)
