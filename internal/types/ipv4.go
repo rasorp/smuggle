@@ -19,7 +19,7 @@ func (i *IPv4Net) UnmarshalJSON(data []byte) error {
 	if _, val, err := net.ParseCIDR(string(bytes.Trim(data, "\""))); err != nil {
 		return err
 	} else {
-		*i = fromIPNet(val)
+		*i = FromIPNet(val)
 		return nil
 	}
 }
@@ -38,7 +38,7 @@ func (i *IPv4Net) String() string {
 }
 
 // FromIPNet converts a standard library net.IPNet to our IPv4Net
-func fromIPNet(n *net.IPNet) IPv4Net {
+func FromIPNet(n *net.IPNet) IPv4Net {
 	prefixLen, _ := n.Mask.Size()
 	return IPv4Net{
 		fromIP(n.IP),
