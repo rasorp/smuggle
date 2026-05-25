@@ -16,3 +16,7 @@ smuggle-net.json
 .idea/
 .vscode/
 .zed/
+
+# A scratch directory for temporary files that should not be committed,
+# providing a space for experimentation and testing.
+.scratch/
