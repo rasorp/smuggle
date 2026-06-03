@@ -34,4 +34,4 @@ jobs:
         with:
           name: smuggle_${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/${{ matrix.goos }}_${{ matrix.goarch }}/smuggle
-          retention-days: 1
+          retention-days: 14
