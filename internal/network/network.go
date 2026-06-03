@@ -160,7 +160,7 @@ func (m *Manager) findRandomSubnet(
 
 	maxAttempts := calculateMaxAttempts(len(usedSubnets))
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for range maxAttempts {
 
 		randomIndex := randInt(0, totalSubnets)
 		candidateIP := cfg.IPv4.Min + types.IPv4Addr(randomIndex)*types.IPv4Addr(subnetSize)
