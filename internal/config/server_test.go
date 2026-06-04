@@ -232,7 +232,8 @@ func TestServerConfig_Validate(t *testing.T) {
 }
 
 func Test_ServerConfigCommandFlags(t *testing.T) {
-	expectedFlags := []cli.Flag{
+	expectedFlags := RPCConfigCommandFlags()
+	expectedFlags = append(expectedFlags, []cli.Flag{
 		&cli.DurationFlag{
 			HideDefault: true,
 			Name:        reaperIntervalFlag,
@@ -245,7 +246,7 @@ func Test_ServerConfigCommandFlags(t *testing.T) {
 			Usage:       "Duration after which inactive clients are reaped",
 			Sources:     cli.EnvVars("SMUGGLE_REAPER_THRESHOLD"),
 		},
-	}
+	}...)
 	must.Eq(t, expectedFlags, ServerConfigCommandFlags())
 }
 
@@ -259,6 +260,7 @@ func Test_ServerConfigFromCommand(t *testing.T) {
 			name:     "no flags",
 			setFlags: func(_ *cli.Command) {},
 			expected: &ServerConfig{
+				RPC:    &RPCConfig{},
 				Reaper: &ReaperConfig{},
 			},
 		},
@@ -269,6 +271,7 @@ func Test_ServerConfigFromCommand(t *testing.T) {
 				must.NoError(t, cmd.Set(reaperThresholdFlag, "15m"))
 			},
 			expected: &ServerConfig{
+				RPC: &RPCConfig{},
 				Reaper: &ReaperConfig{
 					Interval:  10 * time.Minute,
 					Threshold: 15 * time.Minute,
@@ -281,9 +284,8 @@ func Test_ServerConfigFromCommand(t *testing.T) {
 				must.NoError(t, cmd.Set(reaperIntervalFlag, "10m"))
 			},
 			expected: &ServerConfig{
-				Reaper: &ReaperConfig{
-					Interval: 10 * time.Minute,
-				},
+				RPC:    &RPCConfig{},
+				Reaper: &ReaperConfig{Interval: 10 * time.Minute},
 			},
 		},
 	}
@@ -473,7 +475,7 @@ func Test_ServerAgentConfigFromCommand(t *testing.T) {
 				HTTP:   &HTTPConfig{},
 				Log:    &LogConfig{},
 				Nomad:  &NomadConfig{},
-				Server: &ServerConfig{Reaper: &ReaperConfig{}},
+				Server: &ServerConfig{RPC: &RPCConfig{}, Reaper: &ReaperConfig{}},
 				Store:  &StoreConfig{NVar: &StoreNVarConfig{}},
 			},
 		},
@@ -490,7 +492,7 @@ func Test_ServerAgentConfigFromCommand(t *testing.T) {
 				HTTP:   &HTTPConfig{Port: 8080},
 				Log:    &LogConfig{Level: "debug"},
 				Nomad:  &NomadConfig{Address: "http://nomad.example.com:4646"},
-				Server: &ServerConfig{Reaper: &ReaperConfig{Interval: 10 * time.Minute}},
+				Server: &ServerConfig{RPC: &RPCConfig{}, Reaper: &ReaperConfig{Interval: 10 * time.Minute}},
 				Store:  &StoreConfig{Backend: "nvar", NVar: &StoreNVarConfig{}},
 			},
 		},

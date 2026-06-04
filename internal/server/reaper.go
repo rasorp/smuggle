@@ -12,7 +12,7 @@ func (s *Server) startNetworkReaper() {
 	s.shutdownGroup.Add(1)
 	defer s.shutdownGroup.Done()
 
-	s.logger.Info("starting down network reaper")
+	s.logger.Info("starting network reaper")
 
 	// Perform an initial run of the reaper on startup, so we don't have to wait
 	// for the first interval to elapse.
@@ -52,27 +52,20 @@ func (s *Server) networkReaper() {
 
 func (s *Server) reapNetworkSubnets(net *types.Network) {
 
-	// We may log more than one message, so caputre the pairs here to avoid
+	// We may log more than one message, so capture the pairs here to avoid
 	// multiple calls to the function and slice allocations.
 	logPairs := net.LoggingPairs()
 
 	s.logger.Info("running network subnet reaper", logPairs...)
 
-	req := types.StoreListSubnetsReq{Network: net.Name}
-
-	subnetsResp, err := s.store.ListSubnets(&req)
-	if err != nil {
-		s.logger.Error("failed to list network subnets for reaping",
-			append(logPairs, zap.Error(err))...)
-		return
-	}
+	subnetsResp := s.handlers.ListSubnets(net.Name)
 
 	s.logger.Info("successfully listed network subnets for reaping",
-		append(logPairs, zap.Int("subnet_num", len(subnetsResp.Subnets)))...)
+		append(logPairs, zap.Int("subnet_num", len(subnetsResp)))...)
 
 	now := time.Now()
 
-	for _, subnet := range subnetsResp.Subnets {
+	for _, subnet := range subnetsResp {
 
 		// If the subnet is already marked as expired, check if it has been
 		// expired for long enough to be deleted.
@@ -94,31 +87,19 @@ func (s *Server) reapNetworkSubnets(net *types.Network) {
 
 func (s *Server) handleSubnetExpired(subnet *types.Subnet) {
 
-	// We may log more than one message, so caputre the pairs here to avoid
+	// We may log more than one message, so capture the pairs here to avoid
 	// multiple calls to the function and slice allocations.
 	logPairs := subnet.LoggingPairs()
 
 	s.logger.Debug("deleting expired subnet", logPairs...)
 
-	req := types.StoreDeleteSubnetReq{
-		ID:          subnet.ClientID,
-		NetworkName: subnet.NetworkName,
-	}
-
-	// Delete the subnet from the store. If it fails, we can retry on the next
-	// run of the reaper. At this point, the subnet is already marked as expired
-	// and has been removed from cluster host routing, so this is just cleanup.
-	_, err := s.store.DeleteSubnet(&req)
-	if err != nil {
-		s.logger.Error("failed to delete expired subnet", append(logPairs, zap.Error(err))...)
-	} else {
-		s.logger.Info("successfully deleted expired subnet", logPairs...)
-	}
+	s.handlers.DeleteSubnet(subnet.NetworkName, subnet.ClientID)
+	s.logger.Info("enqueued expired subnet for deletion", logPairs...)
 }
 
 func (s *Server) handleSubnetExpiration(subnet *types.Subnet) {
 
-	// We may log more than one message, so caputre the pairs here to avoid
+	// We may log more than one message, so capture the pairs here to avoid
 	// multiple calls to the function and slice allocations.
 	logPairs := subnet.LoggingPairs()
 
@@ -126,14 +107,9 @@ func (s *Server) handleSubnetExpiration(subnet *types.Subnet) {
 
 	subnet.Expired = true
 
-	// Mark the subnet as expired in the store. It would be possible to retry
-	// this call until it succeeds, but if the store is having availability
-	// issues, we don't want to overload it. The reaper will attempt to mark it
-	// again on the next run.
-	_, err := s.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: subnet})
-	if err != nil {
-		s.logger.Error("failed to mark subnet as expired", append(logPairs, zap.Error(err))...)
-	} else {
-		s.logger.Info("successfully marked subnet as expired", logPairs...)
-	}
+	// Update the cache immediately so watching clients see the expiration on
+	// the next poll. The backing store write is handled asynchronously by the
+	// write buffer.
+	s.handlers.SetSubnet(subnet)
+	s.logger.Info("enqueued subnet expiration", logPairs...)
 }

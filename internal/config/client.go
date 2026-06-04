@@ -18,6 +18,11 @@ const (
 	dataDirFlag          = "data-dir"
 	disableIPMasqFlag    = "disable-ipmasq"
 	networkInterfaceFlag = "network-interface"
+	serversFlag          = "servers"
+
+	// DefaultCNIDir is the directory where Smuggle writes CNI configuration
+	// files when no other path is provided.
+	DefaultCNIDir = "/opt/smuggle/config"
 )
 
 type ClientConfig struct {
@@ -34,6 +39,10 @@ type ClientConfig struct {
 	// networking. If not specified, the default interface will be identified
 	// and used.
 	NetworkInterface string `hcl:"network_interface,optional" json:"network_interface"`
+
+	// Servers holds the addresses of Smuggle servers the client connects to
+	// via RPC for all subnet and network operations.
+	Servers *ServersConfig `hcl:"servers,block" json:"servers"`
 }
 
 func DefaultClientConfig() *ClientConfig {
@@ -41,6 +50,7 @@ func DefaultClientConfig() *ClientConfig {
 		DataDir:          "/var/lib/smuggle/client",
 		DisableIPMasq:    helper.PointerOf(false),
 		NetworkInterface: "",
+		Servers:          DefaultServersConfig(),
 	}
 }
 
@@ -63,6 +73,9 @@ func (c *ClientConfig) Merge(other *ClientConfig) *ClientConfig {
 	if other.NetworkInterface != "" {
 		result.NetworkInterface = other.NetworkInterface
 	}
+	if other.Servers != nil {
+		result.Servers = result.Servers.Merge(other.Servers)
+	}
 
 	return &result
 }
@@ -76,12 +89,12 @@ func (c *ClientConfig) Validate() []error {
 	if !filepath.IsAbs(c.DataDir) || c.DataDir == "" {
 		errs = append(errs, errors.New("client data directory must be an absolute path"))
 	}
-
 	return errs
 }
 
 func ClientConfigCommandFlags() []cli.Flag {
-	return []cli.Flag{
+	flags := ServersConfigCommandFlags()
+	flags = append(flags, []cli.Flag{
 		&cli.StringFlag{
 			HideDefault: true,
 			Name:        dataDirFlag,
@@ -100,13 +113,15 @@ func ClientConfigCommandFlags() []cli.Flag {
 			Usage:       "The network interface to use for client networking",
 			Sources:     cli.EnvVars("SMUGGLE_NETWORK_INTERFACE"),
 		},
-	}
+	}...)
+	return flags
 }
 
 func ClientConfigFromCommand(c *cli.Command) *ClientConfig {
 	cfg := &ClientConfig{
 		DataDir:          c.String(dataDirFlag),
 		NetworkInterface: c.String(networkInterfaceFlag),
+		Servers:          ServersConfigFromCommand(c),
 	}
 
 	if c.IsSet(disableIPMasqFlag) {
@@ -122,8 +137,6 @@ type ClientAgentConfig struct {
 	Client *ClientConfig `hcl:"client,block" json:"client"`
 	HTTP   *HTTPConfig   `hcl:"http,block" json:"http"`
 	Log    *LogConfig    `hcl:"log,block" json:"log"`
-	Nomad  *NomadConfig  `hcl:"nomad,block" json:"nomad"`
-	Store  *StoreConfig  `hcl:"store,block" json:"store"`
 }
 
 func DefaultClientAgentConfig() *ClientAgentConfig {
@@ -131,8 +144,6 @@ func DefaultClientAgentConfig() *ClientAgentConfig {
 		Client: DefaultClientConfig(),
 		HTTP:   DefaultHTTPConfig(),
 		Log:    DefaultLogConfig(),
-		Nomad:  DefaultNomadConfig(),
-		Store:  DefaultStoreConfig(),
 	}
 }
 
@@ -149,8 +160,6 @@ func (c *ClientAgentConfig) Merge(other *ClientAgentConfig) *ClientAgentConfig {
 	result.Client = result.Client.Merge(other.Client)
 	result.HTTP = result.HTTP.Merge(other.HTTP)
 	result.Log = result.Log.Merge(other.Log)
-	result.Nomad = result.Nomad.Merge(other.Nomad)
-	result.Store = result.Store.Merge(other.Store)
 
 	return &result
 }
@@ -161,8 +170,6 @@ func (c *ClientAgentConfig) Validate() []error {
 	errs = append(errs, c.Client.Validate()...)
 	errs = append(errs, c.HTTP.Validate()...)
 	errs = append(errs, c.Log.Validate()...)
-	errs = append(errs, c.Nomad.Validate()...)
-	errs = append(errs, c.Store.Validate()...)
 
 	return errs
 }
@@ -177,8 +184,6 @@ func ClientAgentConfigCommandFlags() []cli.Flag {
 	flags = append(flags, ClientConfigCommandFlags()...)
 	flags = append(flags, HTTPConfigCommandFlags()...)
 	flags = append(flags, LogConfigCommandFlags()...)
-	flags = append(flags, NomadConfigCommandFlags()...)
-	flags = append(flags, StoreConfigCommandFlags()...)
 	return flags
 }
 
@@ -187,8 +192,6 @@ func ClientAgentConfigFromCommand(cmd *cli.Command) *ClientAgentConfig {
 		Client: ClientConfigFromCommand(cmd),
 		HTTP:   HTTPConfigFromCommand(cmd),
 		Log:    LogConfigFromCommand(cmd),
-		Nomad:  NomadConfigFromCommand(cmd),
-		Store:  StoreConfigFromCommand(cmd),
 	}
 }
 
@@ -258,4 +261,62 @@ func parseClientAgentConfigJSONFile(path string) (*ClientAgentConfig, error) {
 	}
 
 	return &resp, nil
+}
+
+// ServersConfig holds the addresses of Smuggle servers that a client agent
+// connects to for all store operations. It is kept as a dedicated struct to
+// allow future expansion (e.g. TLS settings, per-server weights) without
+// breaking the existing configuration schema.
+type ServersConfig struct {
+	// Addresses is the list of server RPC addresses in "host:port" form.
+	Addresses []string `hcl:"addresses,optional" json:"addresses"`
+}
+
+// DefaultServersConfig returns an empty ServersConfig.
+func DefaultServersConfig() *ServersConfig {
+	return &ServersConfig{
+		Addresses: []string{
+			"localhost:8081",
+		},
+	}
+}
+
+// IsConfigured returns true when at least one server address has been set.
+func (s *ServersConfig) IsConfigured() bool {
+	return s != nil && len(s.Addresses) > 0
+}
+
+func (s *ServersConfig) Merge(other *ServersConfig) *ServersConfig {
+	if s == nil {
+		return other
+	}
+	if other == nil {
+		return s
+	}
+	result := *s
+	if len(other.Addresses) > 0 {
+		result.Addresses = other.Addresses
+	}
+	return &result
+}
+
+func (s *ServersConfig) Validate() []error {
+	return nil
+}
+
+func ServersConfigCommandFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringSliceFlag{
+			HideDefault: true,
+			Name:        serversFlag,
+			Usage:       "Smuggle server addresses (host:port) to connect to for store operations",
+			Sources:     cli.EnvVars("SMUGGLE_SERVERS"),
+		},
+	}
+}
+
+func ServersConfigFromCommand(cmd *cli.Command) *ServersConfig {
+	return &ServersConfig{
+		Addresses: cmd.StringSlice(serversFlag),
+	}
 }

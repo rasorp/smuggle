@@ -119,6 +119,12 @@ func TestClientConfig_Validate(t *testing.T) {
 
 func Test_ClientConfigCommandFlags(t *testing.T) {
 	expectedFlags := []cli.Flag{
+		&cli.StringSliceFlag{
+			HideDefault: true,
+			Name:        serversFlag,
+			Usage:       "Smuggle server addresses (host:port) to connect to for store operations",
+			Sources:     cli.EnvVars("SMUGGLE_SERVERS"),
+		},
 		&cli.StringFlag{
 			HideDefault: true,
 			Name:        dataDirFlag,
@@ -150,7 +156,9 @@ func Test_ClientConfigFromComand(t *testing.T) {
 		{
 			name:     "no flags",
 			setFlags: func(_ *cli.Command) {},
-			expected: &ClientConfig{},
+			expected: &ClientConfig{
+				Servers: &ServersConfig{},
+			},
 		},
 		{
 			name: "all flags",
@@ -163,6 +171,7 @@ func Test_ClientConfigFromComand(t *testing.T) {
 				DataDir:          "/custom/dir",
 				DisableIPMasq:    helper.PointerOf(true),
 				NetworkInterface: "eth0",
+				Servers:          &ServersConfig{},
 			},
 		},
 	}
@@ -183,8 +192,6 @@ func Test_DefaultClientAgentConfig(t *testing.T) {
 	must.Eq(t, DefaultClientConfig(), cfg.Client)
 	must.Eq(t, DefaultHTTPConfig(), cfg.HTTP)
 	must.Eq(t, DefaultLogConfig(), cfg.Log)
-	must.Eq(t, DefaultNomadConfig(), cfg.Nomad)
-	must.Eq(t, DefaultStoreConfig(), cfg.Store)
 }
 
 func TestClientAgentConfig_Merge(t *testing.T) {
@@ -218,22 +225,16 @@ func TestClientAgentConfig_Merge(t *testing.T) {
 				Client: &ClientConfig{DataDir: "/var/lib/smuggle/client"},
 				HTTP:   &HTTPConfig{Port: 9090},
 				Log:    &LogConfig{Level: "info"},
-				Nomad:  &NomadConfig{Address: "http://localhost:4646"},
-				Store:  &StoreConfig{Backend: "nvar", NVar: &StoreNVarConfig{Path: "smuggle/"}},
 			},
 			other: &ClientAgentConfig{
 				Client: &ClientConfig{DataDir: "/data/smuggle", NetworkInterface: "eth0"},
 				HTTP:   &HTTPConfig{Port: 8080},
 				Log:    &LogConfig{Level: "debug"},
-				Nomad:  &NomadConfig{Address: "http://nomad.example.com:4646"},
-				Store:  &StoreConfig{NVar: &StoreNVarConfig{Path: "platform/"}},
 			},
 			expected: &ClientAgentConfig{
 				Client: &ClientConfig{DataDir: "/data/smuggle", NetworkInterface: "eth0"},
 				HTTP:   &HTTPConfig{Port: 8080},
 				Log:    &LogConfig{Level: "debug"},
-				Nomad:  &NomadConfig{Address: "http://nomad.example.com:4646"},
-				Store:  &StoreConfig{Backend: "nvar", NVar: &StoreNVarConfig{Path: "platform/"}},
 			},
 		},
 	}
@@ -267,8 +268,6 @@ func TestClientAgentConfig_Validate(t *testing.T) {
 				Client: &ClientConfig{DataDir: "relative/path"},
 				HTTP:   DefaultHTTPConfig(),
 				Log:    DefaultLogConfig(),
-				Nomad:  DefaultNomadConfig(),
-				Store:  DefaultStoreConfig(),
 			},
 			expectedError: true,
 		},
@@ -283,9 +282,7 @@ func TestClientAgentConfig_Validate(t *testing.T) {
 					AccessLogLevel: "debug",
 					Port:           9090,
 				},
-				Log:   DefaultLogConfig(),
-				Nomad: DefaultNomadConfig(),
-				Store: DefaultStoreConfig(),
+				Log: DefaultLogConfig(),
 			},
 			expectedError: true,
 		},
@@ -295,19 +292,6 @@ func TestClientAgentConfig_Validate(t *testing.T) {
 				Client: DefaultClientConfig(),
 				HTTP:   DefaultHTTPConfig(),
 				Log:    &LogConfig{Level: "invalid-level"},
-				Nomad:  DefaultNomadConfig(),
-				Store:  DefaultStoreConfig(),
-			},
-			expectedError: true,
-		},
-		{
-			name: "invalid store config",
-			config: &ClientAgentConfig{
-				Client: DefaultClientConfig(),
-				HTTP:   DefaultHTTPConfig(),
-				Log:    DefaultLogConfig(),
-				Nomad:  DefaultNomadConfig(),
-				Store:  &StoreConfig{Backend: "etcd"},
 			},
 			expectedError: true,
 		},
@@ -335,8 +319,6 @@ func Test_ClientAgentConfigCommandFlags(t *testing.T) {
 	expected = append(expected, ClientConfigCommandFlags()...)
 	expected = append(expected, HTTPConfigCommandFlags()...)
 	expected = append(expected, LogConfigCommandFlags()...)
-	expected = append(expected, NomadConfigCommandFlags()...)
-	expected = append(expected, StoreConfigCommandFlags()...)
 
 	must.Eq(t, expected, ClientAgentConfigCommandFlags())
 }
@@ -351,11 +333,9 @@ func Test_ClientAgentConfigFromCommand(t *testing.T) {
 			name:     "no flags",
 			setFlags: func(_ *cli.Command) {},
 			expected: &ClientAgentConfig{
-				Client: &ClientConfig{},
+				Client: &ClientConfig{Servers: &ServersConfig{}},
 				HTTP:   &HTTPConfig{},
 				Log:    &LogConfig{},
-				Nomad:  &NomadConfig{},
-				Store:  &StoreConfig{NVar: &StoreNVarConfig{}},
 			},
 		},
 		{
@@ -364,15 +344,11 @@ func Test_ClientAgentConfigFromCommand(t *testing.T) {
 				must.NoError(t, cmd.Set(dataDirFlag, "/data/smuggle"))
 				must.NoError(t, cmd.Set(httpPortFlag, "8080"))
 				must.NoError(t, cmd.Set(logLevalFlag, "debug"))
-				must.NoError(t, cmd.Set(nomadAddrFlag, "http://nomad.example.com:4646"))
-				must.NoError(t, cmd.Set(storeBackendFlag, "nvar"))
 			},
 			expected: &ClientAgentConfig{
-				Client: &ClientConfig{DataDir: "/data/smuggle"},
+				Client: &ClientConfig{DataDir: "/data/smuggle", Servers: &ServersConfig{}},
 				HTTP:   &HTTPConfig{Port: 8080},
 				Log:    &LogConfig{Level: "debug"},
-				Nomad:  &NomadConfig{Address: "http://nomad.example.com:4646"},
-				Store:  &StoreConfig{Backend: "nvar", NVar: &StoreNVarConfig{}},
 			},
 		},
 	}
@@ -395,25 +371,15 @@ client {
 log {
   level = "debug"
 }
-store {
-  backend = "nvar"
-  nvar {
-    path = "smuggle/"
-  }
-}
 `
 
 	validJSON := `{
-  "log": { "level": "warn" },
-  "store": { "backend": "nvar", "nvar": { "path": "smuggle/" } }
+  "log": { "level": "warn" }
 }`
 
 	secondHCL := `
 log {
   level = "warn"
-}
-nomad {
-  address = "http://nomad.example.com:4646"
 }
 `
 
@@ -443,10 +409,6 @@ nomad {
 					NetworkInterface: "eth0",
 				},
 				Log: &LogConfig{Level: "debug"},
-				Store: &StoreConfig{
-					Backend: "nvar",
-					NVar:    &StoreNVarConfig{Path: "smuggle/"},
-				},
 			},
 		},
 		{
@@ -458,10 +420,6 @@ nomad {
 			},
 			expected: &ClientAgentConfig{
 				Log: &LogConfig{Level: "warn"},
-				Store: &StoreConfig{
-					Backend: "nvar",
-					NVar:    &StoreNVarConfig{Path: "smuggle/"},
-				},
 			},
 		},
 		{
@@ -480,12 +438,7 @@ nomad {
 					DataDir:          "/var/lib/smuggle/client",
 					NetworkInterface: "eth0",
 				},
-				Log:   &LogConfig{Level: "warn"},
-				Nomad: &NomadConfig{Address: "http://nomad.example.com:4646"},
-				Store: &StoreConfig{
-					Backend: "nvar",
-					NVar:    &StoreNVarConfig{Path: "smuggle/"},
-				},
+				Log: &LogConfig{Level: "warn"},
 			},
 		},
 		{

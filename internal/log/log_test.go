@@ -24,6 +24,7 @@ func TestComponentName(t *testing.T) {
 		{ComponentNameHTTP, "http"},
 		{ComponentNameNetwork, "network"},
 		{ComponentNameIptables, "iptables"},
+		{ComponentNameRPC, "rpc"},
 	}
 
 	for _, tc := range testCases {
