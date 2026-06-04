@@ -21,9 +21,9 @@ const (
 type HTTPConfig struct {
 	Enabled        *bool  `hcl:"enabled,optional" json:"enabled"`
 	DebugEnabled   *bool  `hcl:"debug_enabled,optional" json:"debug_enabled"`
-	Address        string `hcl:"address" json:"address"`
-	AccessLogLevel string `hcl:"access_log_level" json:"access_log_level"`
-	Port           uint   `hcl:"port" json:"port"`
+	Address        string `hcl:"address,optional" json:"address"`
+	AccessLogLevel string `hcl:"access_log_level,optional" json:"access_log_level"`
+	Port           uint   `hcl:"port,optional" json:"port"`
 }
 
 func DefaultHTTPConfig() *HTTPConfig {
