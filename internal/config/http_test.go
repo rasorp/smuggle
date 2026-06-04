@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 
 	"github.com/shoenig/test/must"
@@ -17,6 +18,50 @@ func Test_DefaultHTTPConfig(t *testing.T) {
 	must.Eq(t, "localhost", cfg.Address)
 	must.Eq(t, "debug", cfg.AccessLogLevel)
 	must.Eq(t, uint(9090), cfg.Port)
+}
+
+func TestHTTPConfig_optionalFieldsHCL(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "enabled",
+			input: "http { enabled = true }",
+		},
+		{
+			name:  "debug enabled",
+			input: "http { debug_enabled = true }",
+		},
+		{
+			name:  "address",
+			input: "http { address = \"127.0.0.1\" }",
+		},
+		{
+			name:  "access log level",
+			input: "http { access_log_level = \"debug\" }",
+		},
+		{
+			name:  "port",
+			input: "http { port = 1313 }",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+
+			file, err := os.CreateTemp("", "*.hcl")
+			must.NoError(t, err)
+			t.Cleanup(func() { _ = os.Remove(file.Name()) })
+
+			_, err = file.WriteString(tc.input)
+			must.NoError(t, err)
+			must.NoError(t, file.Close())
+
+			_, err = parseClientAgentConfigFile(file.Name())
+			must.NoError(t, err)
+		})
+	}
 }
 
 func TestHTTPConfig_IsEnabled(t *testing.T) {
