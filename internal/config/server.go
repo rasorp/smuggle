@@ -17,6 +17,7 @@ const (
 )
 
 type ServerConfig struct {
+	RPC    *RPCConfig    `hcl:"rpc,block" json:"rpc"`
 	Reaper *ReaperConfig `hcl:"reaper,block" json:"reaper"`
 }
 
@@ -54,6 +55,7 @@ func (r *ReaperConfig) Parse() error {
 
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
+		RPC: DefaultRPCConfig(),
 		Reaper: &ReaperConfig{
 			Interval:  5 * time.Minute,
 			Threshold: 5 * time.Minute,
@@ -70,6 +72,10 @@ func (s *ServerConfig) Merge(other *ServerConfig) *ServerConfig {
 	}
 
 	result := *s
+
+	if other.RPC != nil {
+		result.RPC = result.RPC.Merge(other.RPC)
+	}
 
 	if other.Reaper != nil {
 		if result.Reaper == nil {
@@ -93,11 +99,15 @@ func (s *ServerConfig) Merge(other *ServerConfig) *ServerConfig {
 
 func (s *ServerConfig) Validate() []error {
 	var errs []error
+	if s.RPC != nil {
+		errs = append(errs, s.RPC.Validate()...)
+	}
 	return errs
 }
 
 func ServerConfigCommandFlags() []cli.Flag {
-	return []cli.Flag{
+	flags := RPCConfigCommandFlags()
+	flags = append(flags, []cli.Flag{
 		&cli.DurationFlag{
 			HideDefault: true,
 			Name:        reaperIntervalFlag,
@@ -110,11 +120,13 @@ func ServerConfigCommandFlags() []cli.Flag {
 			Usage:       "Duration after which inactive clients are reaped",
 			Sources:     cli.EnvVars("SMUGGLE_REAPER_THRESHOLD"),
 		},
-	}
+	}...)
+	return flags
 }
 
 func ServerConfigFromCommand(cmd *cli.Command) *ServerConfig {
 	return &ServerConfig{
+		RPC: RPCConfigFromCommand(cmd),
 		Reaper: &ReaperConfig{
 			Interval:  cmd.Duration(reaperIntervalFlag),
 			Threshold: cmd.Duration(reaperThresholdFlag),
@@ -242,9 +254,11 @@ func parseServerAgentConfigHCLFile(path string) (*ServerAgentConfig, error) {
 		return nil, fmt.Errorf("failed to decode HCL: %w", diags)
 	}
 
-	if resp.Server != nil && resp.Server.Reaper != nil {
-		if err := resp.Server.Reaper.Parse(); err != nil {
-			return nil, fmt.Errorf("failed to parse server config: %w", err)
+	if resp.Server != nil {
+		if resp.Server.Reaper != nil {
+			if err := resp.Server.Reaper.Parse(); err != nil {
+				return nil, fmt.Errorf("failed to parse server reaper config: %w", err)
+			}
 		}
 	}
 
@@ -269,9 +283,11 @@ func parseServerAgentConfigJSONFile(path string) (*ServerAgentConfig, error) {
 		return nil, fmt.Errorf("failed to decode JSON: %w", diags)
 	}
 
-	if resp.Server != nil && resp.Server.Reaper != nil {
-		if err := resp.Server.Reaper.Parse(); err != nil {
-			return nil, fmt.Errorf("failed to parse server config: %w", err)
+	if resp.Server != nil {
+		if resp.Server.Reaper != nil {
+			if err := resp.Server.Reaper.Parse(); err != nil {
+				return nil, fmt.Errorf("failed to parse server reaper config: %w", err)
+			}
 		}
 	}
 

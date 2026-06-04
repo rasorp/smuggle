@@ -1,9 +1,5 @@
 package types
 
-import (
-	"context"
-)
-
 // StoreVersionLatest defines the latest version identifier of the state store
 // schema. This forms a basis for migrations and schema versioning in the future
 // if needed.
@@ -13,30 +9,14 @@ import (
 // migrations from older versions to the latest.
 const StoreVersionLatest = "v1"
 
-// Store defines the interface for persisting and retrieving network and subnet
-// configurations. Each implementation is responsible for managing the storage
-// and how version schema migrations are handled as well as their own internal
-// data structures.
-type Store interface {
-	ListNetworks(*StoreGetNetworksReq) (*StoreGetNetworksResp, error)
-
-	ListSubnets(*StoreListSubnetsReq) (*StoreListSubnetsResp, error)
-
-	DeleteSubnet(*StoreDeleteSubnetReq) (*StoreDeleteSubnetResp, error)
-
-	GetSubnet(*StoreGetSubnetReq) (*StoreGetSubnetResp, error)
-
-	SetSubnet(*StoreSetSubnetReq) (*StoreSetSubnetResp, error)
-
-	WatchSubnets(context.Context, *StoreWatchSubnetsReq) (*StoreWatchSubnetsResp, error)
-}
-
 type StoreDeleteSubnetReq struct {
 	ID          string
 	NetworkName string
 }
 
-type StoreDeleteSubnetResp struct{}
+type StoreDeleteSubnetResp struct {
+	ModifyIndex uint64
+}
 
 type StoreGetNetworksReq struct{}
 
@@ -56,7 +36,9 @@ type StoreSetSubnetReq struct {
 	Subnet *Subnet
 }
 
-type StoreSetSubnetResp struct{}
+type StoreSetSubnetResp struct {
+	ModifyIndex uint64
+}
 
 type StoreGetSubnetReq struct {
 	ID          string

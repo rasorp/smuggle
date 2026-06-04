@@ -8,8 +8,8 @@ import (
 	"github.com/rasorp/smuggle/internal/config"
 	"github.com/rasorp/smuggle/internal/log"
 	"github.com/rasorp/smuggle/internal/server"
+	smugglestore "github.com/rasorp/smuggle/internal/store"
 	"github.com/rasorp/smuggle/internal/store/nvar"
-	"github.com/rasorp/smuggle/internal/types"
 )
 
 // NewServerAgent constructs and returns an Agent configured to run the Smuggle
@@ -50,7 +50,7 @@ func NewServerAgent(cfg *config.ServerAgentConfig) (*Agent, error) {
 }
 
 // setupStore initialises the backing store based on the provided StoreConfig.
-func setupStore(cfg *config.StoreConfig, nomadClient *api.Client) (types.Store, error) {
+func setupStore(cfg *config.StoreConfig, nomadClient *api.Client) (smugglestore.BackingStore, error) {
 	switch cfg.Backend {
 	case "nvar":
 		return nvar.New(nomadClient, cfg.NVar.Path), nil

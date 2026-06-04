@@ -9,7 +9,9 @@ files.
 
 ## Client
 The client manages local host networking, VXLAN interfaces, and CNI
-configurations.
+configurations. All subnet and network store operations are performed via RPC
+through the Smuggle server. The client does not connect to Nomad or the backing
+store directly.
 
 ### Options
 | Option | Type | Default | Description |
@@ -49,6 +51,48 @@ client {
     "data_dir": "/var/lib/smuggle/client",
     "disable_ipmasq": false,
     "network_interface": "eth0"
+  }
+}
+```
+
+## Servers
+The servers block configures the Smuggle server addresses the client connects
+to via RPC. All reads and writes to the backing store are proxied through the
+server — the client never contacts Nomad or the store backend directly.
+
+### Options
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `addresses` | list(string) | `["localhost:8081"]` | List of Smuggle server RPC addresses in `host:port` form |
+
+### Command-Line Flags
+```bash
+--servers=10.0.0.1:8081
+--servers=10.0.0.2:8081
+```
+
+### Environment Variables
+```bash
+SMUGGLE_SERVERS=10.0.0.1:8081,10.0.0.2:8081
+```
+
+### Configuration File
+**HCL:**
+```hcl
+client {
+  servers {
+    addresses = ["10.0.0.1:8081", "10.0.0.2:8081"]
+  }
+}
+```
+
+**JSON:**
+```json
+{
+  "client": {
+    "servers": {
+      "addresses": ["10.0.0.1:8081", "10.0.0.2:8081"]
+    }
   }
 }
 ```
@@ -159,121 +203,6 @@ log {
     "json": false,
     "include_line": true,
     "enable_stacktrace": false
-  }
-}
-```
-
-## Nomad
-Configure connection to the Nomad cluster. This is used to read network
-configurations and client subnet allocations.
-
-### Options
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `address` | string | `http://localhost:4646` | Nomad API address |
-| `token` | string | `""` | Nomad ACL token |
-| `ca_cert` | string | `""` | Path to CA certificate for TLS |
-| `ca_path` | string | `""` | Path to directory of CA certificates |
-| `client_cert` | string | `""` | Path to client certificate for mTLS |
-| `client_key` | string | `""` | Path to client private key for mTLS |
-| `tls_server_name` | string | `""` | SNI hostname for TLS connection |
-| `skip_verify` | bool | `false` | Skip TLS certificate verification |
-
-### Command-Line Flags
-```bash
---nomad-addr=https://nomad.example.com:4646
---nomad-token=abc123
---nomad-ca-cert=/etc/nomad/ca.pem
---nomad-client-cert=/etc/nomad/client.pem
---nomad-client-key=/etc/nomad/client-key.pem
---nomad-tls-server-name=nomad.example.com
---nomad-skip-verify
-```
-
-### Environment Variables
-```bash
-NOMAD_ADDR=https://nomad.example.com:4646
-NOMAD_TOKEN=abc123
-NOMAD_CACERT=/etc/nomad/ca.pem
-NOMAD_CAPATH=/etc/nomad/ca-dir
-NOMAD_CLIENT_CERT=/etc/nomad/client.pem
-NOMAD_CLIENT_KEY=/etc/nomad/client-key.pem
-NOMAD_TLS_SERVER_NAME=nomad.example.com
-NOMAD_SKIP_VERIFY=false
-```
-
-### Configuration File
-**HCL:**
-```hcl
-nomad {
-  address         = "https://nomad.example.com:4646"
-  token           = "abc123"
-  ca_cert         = "/etc/nomad/ca.pem"
-  client_cert     = "/etc/nomad/client.pem"
-  client_key      = "/etc/nomad/client-key.pem"
-  tls_server_name = "nomad.example.com"
-  skip_verify     = false
-}
-```
-
-**JSON:**
-```json
-{
-  "nomad": {
-    "address": "https://nomad.example.com:4646",
-    "token": "abc123",
-    "ca_cert": "/etc/nomad/ca.pem",
-    "client_cert": "/etc/nomad/client.pem",
-    "client_key": "/etc/nomad/client-key.pem",
-    "tls_server_name": "nomad.example.com",
-    "skip_verify": false
-  }
-}
-```
-
-## Store
-Configure the backend for reading network configuration data and writing client
-subnet allocations. Currently, only Nomad Variables (`nvar`) backend is
-supported.
-
-### Options
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `backend` | string | `nvar` | Storage backend type (currently only `nvar`) |
-| `nvar.path` | string | `smuggle/` | Path prefix in Nomad Variables |
-
-### Command-Line Flags
-```bash
---store-backend=nvar
---store-nvar-path=smuggle/
-```
-
-### Environment Variables
-```bash
-SMUGGLE_STORE_BACKEND=nvar
-SMUGGLE_STORE_NVAR_PATH=smuggle/
-```
-
-### Configuration File
-**HCL:**
-```hcl
-store {
-  backend = "nvar"
-
-  nvar {
-    path = "smuggle/"
-  }
-}
-```
-
-**JSON:**
-```json
-{
-  "store": {
-    "backend": "nvar",
-    "nvar": {
-      "path": "smuggle/"
-    }
   }
 }
 ```

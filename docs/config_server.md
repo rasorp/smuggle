@@ -9,7 +9,8 @@ files.
 
 ## Server
 The server runs centralised tasks for the Smuggle cluster, including reaping
-expired subnets.
+expired subnets. The server also acts as the sole gateway to the backing store; 
+all client reads and writes are proxied through the server's RPC listener.
 
 ### Options
 | Option | Type | Default | Description |
@@ -47,6 +48,66 @@ server {
     "reaper": {
       "interval": "10m",
       "threshold": "15m"
+    }
+  }
+}
+```
+
+## RPC
+The RPC block configures the server-side RPC listener. Clients connect here for
+all subnet and network store operations.
+
+### Options
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `access_log_level` | string | `debug` | Log level for successful RPC call entries |
+| `bind_address` | string | `localhost` | Address to bind the RPC listener |
+| `bind_port` | uint | `8081` | Port to bind the RPC listener |
+| `write_rate_limit` | int | `20` | Maximum write operations per second forwarded to the backing store (0 = unlimited) |
+| `write_burst` | int | `5` | Token-bucket burst size for the write rate limiter |
+
+### Command-Line Flags
+```bash
+--rpc-access-log-level=info
+--rpc-bind-address=0.0.0.0
+--rpc-bind-port=8081
+--rpc-write-rate=20
+--rpc-write-burst=5
+```
+
+### Environment Variables
+```bash
+SMUGGLE_RPC_ACCESS_LOG_LEVEL=info
+SMUGGLE_RPC_BIND_ADDRESS=0.0.0.0
+SMUGGLE_RPC_BIND_PORT=8081
+SMUGGLE_RPC_WRITE_RATE=20
+SMUGGLE_RPC_WRITE_BURST=5
+```
+
+### Configuration File
+**HCL:**
+```hcl
+server {
+  rpc {
+    access_log_level = "info"
+    bind_address     = "0.0.0.0"
+    bind_port        = 8081
+    write_rate_limit = 20
+    write_burst      = 5
+  }
+}
+```
+
+**JSON:**
+```json
+{
+  "server": {
+    "rpc": {
+      "access_log_level": "info",
+      "bind_address": "0.0.0.0",
+      "bind_port": 8081,
+      "write_rate_limit": 20,
+      "write_burst": 5
     }
   }
 }

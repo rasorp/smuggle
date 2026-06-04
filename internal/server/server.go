@@ -2,18 +2,25 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/rasorp/smuggle/internal/config"
 	"github.com/rasorp/smuggle/internal/log"
-	"github.com/rasorp/smuggle/internal/types"
+	"github.com/rasorp/smuggle/internal/rpc"
+	smugglestore "github.com/rasorp/smuggle/internal/store"
 )
 
 type Server struct {
-	cfg    *config.ServerConfig
-	logger *log.Logger
-	store  types.Store
+	cfg      *config.ServerConfig
+	logger   *log.Logger
+	store    smugglestore.BackingStore
+	handlers *rpc.Handlers
+
+	rpcServer *rpc.Server
 
 	// shutdownCh is used to signal to all server processes that the agent is
 	// shutting down. All long-running processes should monitor this channel and
@@ -26,7 +33,7 @@ type Server struct {
 type ServerReq struct {
 	Config *config.ServerConfig
 	Logger *log.Logger
-	Store  types.Store
+	Store  smugglestore.BackingStore
 }
 
 func New(req *ServerReq) (*Server, error) {
@@ -40,12 +47,43 @@ func New(req *ServerReq) (*Server, error) {
 
 func (s *Server) Start() error {
 	s.logger.Info("starting server")
+
+	handlers, err := rpc.NewHandlers(&rpc.HandlerReq{
+		Store:          s.store,
+		WriteRateLimit: s.cfg.RPC.WriteRateLimit,
+		WriteBurst:     s.cfg.RPC.WriteBurst,
+		StopCh:         s.shutdownCh,
+		Logger:         s.logger,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create RPC handler: %w", err)
+	}
+	s.handlers = handlers
+
+	rpcSrv, err := rpc.NewServer(s.cfg.RPC.Addr(), handlers, s.logger, s.cfg.RPC.AccessLogLevel)
+	if err != nil {
+		return fmt.Errorf("failed to create RPC server: %w", err)
+	}
+	s.rpcServer = rpcSrv
+
+	s.shutdownGroup.Go(func() {
+		s.rpcServer.Serve()
+	})
+
 	go s.startNetworkReaper()
 	return nil
 }
 
 func (s *Server) Stop() error {
 	s.logger.Info("shutting down server")
+
+	// Close the RPC listener first so the Serve goroutine exits and new client
+	// connections are rejected before we signal shutdown to other goroutines.
+	if s.rpcServer != nil {
+		if err := s.rpcServer.Stop(); err != nil {
+			s.logger.Error("error stopping RPC server", zap.Error(err))
+		}
+	}
 
 	close(s.shutdownCh)
 

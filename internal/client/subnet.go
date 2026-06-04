@@ -15,7 +15,7 @@ func (c *Client) startSubnetUpdateHandler() error {
 
 		req := &types.StoreWatchSubnetsReq{NetworkName: network.Name}
 
-		resp, err := c.store.WatchSubnets(context.Background(), req)
+		resp, err := c.server.WatchSubnets(context.Background(), req)
 		if err != nil {
 			return err
 		}
@@ -25,17 +25,17 @@ func (c *Client) startSubnetUpdateHandler() error {
 	return nil
 }
 
-func (c *Client) subnetUpdateHandlerImpl(req *types.StoreWatchSubnetsResp) {
+func (c *Client) subnetUpdateHandlerImpl(resp *types.StoreWatchSubnetsResp) {
 	c.shutdownGroup.Add(1)
 	defer c.shutdownGroup.Done()
 
 	for {
 		select {
-		case err := <-req.ErrorCh:
+		case err := <-resp.ErrorCh:
 			c.logger.Error("error received from subnet watcher", zap.Error(err))
-		case set := <-req.ModifyCh:
+		case set := <-resp.ModifyCh:
 			c.handleSubnetSet(set)
-		case del := <-req.DeleteCh:
+		case del := <-resp.DeleteCh:
 			c.handleSubnetDelete(del)
 		case <-c.shutdownCh:
 			c.logger.Info("shutting down subnet update handler")
@@ -47,14 +47,13 @@ func (c *Client) subnetUpdateHandlerImpl(req *types.StoreWatchSubnetsResp) {
 func (c *Client) handleSubnetDelete(subnets []*types.Subnet) {
 	for _, subnet := range subnets {
 
-		// We may log more than one message, so caputre the pairs here to avoid
+		// We may log more than one message, so capture the pairs here to avoid
 		// multiple calls to the function and slice allocations.
 		logPairs := subnet.LoggingPairs()
 
-		// If the agent has got an update about itself being expired, the
-		// cluster stability is likely compromised. As the addition is not
-		// hanled here, we simply skip the deletion attempt as it won't because
-		// we don't add local subnets this way.
+		// If the agent receives a deletion for its own subnet, the cluster
+		// state is likely compromised. Local subnets are not tracked via the
+		// remote update path so there is nothing to remove.
 		if subnet.ClientID == c.getID() {
 			c.logger.Warn("received subnet deletion for local client; skipping", logPairs...)
 			continue
@@ -86,7 +85,7 @@ func (c *Client) handleSubnetSet(subnets []*types.Subnet) {
 			continue
 		}
 
-		// We may log more than one message, so caputre the pairs here to avoid
+		// We may log more than one message, so capture the pairs here to avoid
 		// multiple calls to the function and slice allocations.
 		logPairs := subnet.LoggingPairs()
 

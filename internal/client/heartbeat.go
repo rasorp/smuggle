@@ -25,7 +25,7 @@ func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
-	// We may log more than one message, so caputre the pairs here to avoid
+	// We may log more than one message, so capture the pairs here to avoid
 	// multiple calls to the function and slice allocations. All fields are
 	// static.
 	logPairs := subnet.LoggingPairs()
@@ -39,7 +39,7 @@ func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 		case <-ticker.C:
 			// Create a copy of the subnet config to update the expiration time
 			// without modifying the original reference. Then write this update
-			// back to the store.
+			// back to the server.
 			subnetCopy := subnet.Copy()
 			subnetCopy.Expiration = time.Now().Add(types.DefaultSubnetTTL)
 
@@ -47,14 +47,14 @@ func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 				append(logPairs, zap.Time("expiration", subnetCopy.Expiration))...,
 			)
 
-			_, err := c.store.SetSubnet(&types.StoreSetSubnetReq{Subnet: subnetCopy})
+			_, err := c.server.SetSubnet(&types.StoreSetSubnetReq{Subnet: subnetCopy})
 
 			// Adjust the ticker interval based on success or failure. On
 			// success, we maintain the regular interval. On failure, we shorten
 			// the interval to retry sooner.
 			//
 			// TODO(jrasell): Consider implementing some form of backoff, so we
-			// don't "hammer" the store on persistent failures that may take a
+			// don't "hammer" the server on persistent failures that may take a
 			// while to resolve.
 			switch err {
 			case nil:

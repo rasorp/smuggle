@@ -52,6 +52,11 @@ type Subnet struct {
 	// typically derived from the host interface's MTU minus any overhead for
 	// the network provider.
 	MTU int `json:"mtu"`
+
+	// ModifyIndex is the Nomad variable ModifyIndex at the time this subnet was
+	// last read from or written to the backing store. It is populated by the
+	// store layer and is never persisted as part of the subnet's JSON payload.
+	ModifyIndex uint64 `json:"-"`
 }
 
 // Copy creates a deep copy of the Subnet, so it can be modified without

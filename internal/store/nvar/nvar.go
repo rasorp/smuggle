@@ -1,13 +1,11 @@
 package nvar
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
-	"time"
 
 	"github.com/hashicorp/nomad/api"
 
@@ -88,6 +86,7 @@ func (s *NomadVariableStore) ListSubnets(
 			return nil, fmt.Errorf("failed to parse subnet: %w", err)
 		}
 
+		clientSubnet.ModifyIndex = variable.ModifyIndex
 		resp.Subnets = append(resp.Subnets, clientSubnet)
 	}
 
@@ -100,12 +99,12 @@ func (s *NomadVariableStore) DeleteSubnet(
 
 	path := filepath.Join(s.clientPath, req.NetworkName, req.ID)
 
-	_, err := s.client.Variables().Delete(path, nil)
+	meta, err := s.client.Variables().Delete(path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete subnet: %w", err)
 	}
 
-	return &types.StoreDeleteSubnetResp{}, nil
+	return &types.StoreDeleteSubnetResp{ModifyIndex: meta.LastIndex}, nil
 }
 
 // SetClientConfig stores the client configuration as a Nomad variable.
@@ -128,12 +127,12 @@ func (s *NomadVariableStore) SetSubnet(
 	}
 
 	// Write the variable
-	_, _, err = s.client.Variables().Update(variable, nil)
+	updatedVar, _, err := s.client.Variables().Update(variable, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write subnet: %w", err)
 	}
 
-	return &types.StoreSetSubnetResp{}, nil
+	return &types.StoreSetSubnetResp{ModifyIndex: updatedVar.ModifyIndex}, nil
 }
 
 // parseNetwork converts a Nomad variable item string into a Network
@@ -152,138 +151,6 @@ func parseNetwork(items map[string]string) (*types.Network, error) {
 	}
 
 	return &subnetConfig, nil
-}
-
-// WatchClientConfigs watches for changes to client configurations stored in Nomad variables.
-// It returns a channel that receives the current list of client configurations whenever
-// a change is detected. The watch continues until the context is cancelled.
-//
-// The function polls Nomad variables using blocking queries with the WaitIndex to efficiently
-// detect changes without excessive API calls.
-func (s *NomadVariableStore) WatchSubnets(
-	ctx context.Context,
-	req *types.StoreWatchSubnetsReq,
-) (*types.StoreWatchSubnetsResp, error) {
-
-	modifyCh := make(chan []*types.Subnet)
-	deleteCh := make(chan []*types.Subnet)
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer close(modifyCh)
-		defer close(deleteCh)
-		defer close(errCh)
-
-		// Start with index 0 to get initial state
-		waitIndex := uint64(0)
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			// Use blocking query with wait index
-			queryOpts := &api.QueryOptions{
-				Prefix:    filepath.Join(s.clientPath, req.NetworkName),
-				WaitIndex: waitIndex,
-				WaitTime:  5 * time.Minute,
-			}
-
-			// Add context to query options
-			queryOpts = queryOpts.WithContext(ctx)
-
-			// List all client configuration variables
-			varList, queryMeta, err := s.client.Variables().List(queryOpts)
-			if err != nil {
-				select {
-				case errCh <- fmt.Errorf("failed to list subnets: %w", err):
-				case <-ctx.Done():
-					return
-				}
-				// Wait before retrying on error
-				select {
-				case <-time.After(10 * time.Second):
-				case <-ctx.Done():
-					return
-				}
-				continue
-			}
-
-			// Check if the index changed (indicating actual changes)
-			if queryMeta.LastIndex <= waitIndex {
-				// No changes, continue watching
-				continue
-			}
-
-			// Parse all client configurations
-			var (
-				modifiedConfigs []*types.Subnet
-				expiredConfigs  []*types.Subnet
-			)
-
-			for _, varStub := range varList {
-
-				if varStub.ModifyIndex < waitIndex {
-					continue
-				}
-
-				variable, _, err := s.client.Variables().Read(varStub.Path, nil)
-				if err != nil {
-					select {
-					case errCh <- fmt.Errorf("failed to read subnet: %w", err):
-					case <-ctx.Done():
-						return
-					}
-					continue
-				}
-
-				// Parse the client config
-				clientConfig, err := parseClientSubnetConfig(variable.Items)
-				if err != nil {
-					select {
-					case errCh <- fmt.Errorf("failed to parse subnet: %w", err):
-					case <-ctx.Done():
-						return
-					}
-					continue
-				}
-
-				if clientConfig.Expired {
-					expiredConfigs = append(expiredConfigs, clientConfig)
-				} else {
-					modifiedConfigs = append(modifiedConfigs, clientConfig)
-				}
-			}
-
-			// Send expired configurations
-			if len(expiredConfigs) > 0 {
-				select {
-				case deleteCh <- expiredConfigs:
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			if len(modifiedConfigs) > 0 {
-				select {
-				case modifyCh <- modifiedConfigs:
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			// Update wait index for next iteration
-			waitIndex = queryMeta.LastIndex
-		}
-	}()
-
-	return &types.StoreWatchSubnetsResp{
-		ModifyCh: modifyCh,
-		DeleteCh: deleteCh,
-		ErrorCh:  errCh,
-	}, nil
 }
 
 // GetClientConfigs retrieves all client subnet configurations stored in Nomad variables.
@@ -308,6 +175,8 @@ func (s *NomadVariableStore) GetSubnet(
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse subnet: %w", err)
 	}
+
+	clientSubnet.ModifyIndex = variable.ModifyIndex
 
 	return &types.StoreGetSubnetResp{
 		Subnet: clientSubnet,

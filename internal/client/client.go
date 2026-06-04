@@ -35,11 +35,12 @@ type Client struct {
 	// and changes to the host.
 	id atomic.Value
 
-	// store is used to persist client state information and receive updates
-	// about other subnets in the Smuggle network.
-	store types.Store
+	// server is the remote Smuggle server the client communicates with to read
+	// and write subnet state and watch for changes.
+	server Server
 
-	//
+	// cniStore writes CNI configuration files to disk when a subnet is
+	// initialised.
 	cniStore *cni.Store
 
 	networkManager *network.Manager
@@ -48,7 +49,7 @@ type Client struct {
 	// should configure on the host.
 	networks []*types.Network
 
-	//
+	// subnets tracks the subnets assigned to this client on each configured network.
 	subnets []*types.Subnet
 
 	// shutdownCh is used to signal to all client processes that the agent is
@@ -62,7 +63,7 @@ type Client struct {
 type ClientReq struct {
 	Config   *config.ClientConfig
 	Logger   *zap.Logger
-	Store    types.Store
+	Server   Server
 	CNIStore *cni.Store
 }
 
@@ -77,7 +78,7 @@ func New(req *ClientReq) (*Client, error) {
 		cfg:            req.Config,
 		logger:         req.Logger.Named(log.ComponentNameClient),
 		networks:       []*types.Network{},
-		store:          req.Store,
+		server:         req.Server,
 		cniStore:       req.CNIStore,
 		networkManager: netManager,
 		shutdownCh:     make(chan struct{}),
@@ -136,7 +137,7 @@ func (c *Client) Init() error {
 
 	// Read all network configurations from the store that we are able to see
 	// and therefore should configure on this host.
-	listResp, err := c.store.ListNetworks(nil)
+	listResp, err := c.server.ListNetworks(nil)
 	if err != nil {
 		return fmt.Errorf("failed to get network configs: %w", err)
 	}
@@ -154,7 +155,7 @@ func (c *Client) Init() error {
 
 		c.networks = append(c.networks, networkConfig)
 
-		clientSubnetResp, err := c.store.GetSubnet(&types.StoreGetSubnetReq{
+		clientSubnetResp, err := c.server.GetSubnet(&types.StoreGetSubnetReq{
 			ID:          c.id.Load().(string),
 			NetworkName: networkConfig.Name,
 		})
@@ -172,10 +173,9 @@ func (c *Client) Init() error {
 
 		if subnet == nil {
 
-			//
 			subnetListReq := types.StoreListSubnetsReq{Network: networkConfig.Name}
 
-			subnetListResp, err := c.store.ListSubnets(&subnetListReq)
+			subnetListResp, err := c.server.ListSubnets(&subnetListReq)
 			if err != nil {
 				return fmt.Errorf("failed to list existing client subnets: %w", err)
 			}
@@ -221,7 +221,7 @@ func (c *Client) initSubnet(netCfg *types.Network, cfg *types.Subnet) error {
 		return fmt.Errorf("failed to set up local subnet: %w", err)
 	}
 
-	if _, err := c.store.SetSubnet(&types.StoreSetSubnetReq{
+	if _, err := c.server.SetSubnet(&types.StoreSetSubnetReq{
 		Subnet: providerResp.Network,
 	}); err != nil {
 		return fmt.Errorf("failed to store client subnet: %w", err)
