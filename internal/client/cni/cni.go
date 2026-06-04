@@ -72,7 +72,7 @@ func (s *Store) Set(cfg *Config) error {
 	}
 
 	// Marshal the configuration to JSON
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal CNI config: %w", err)
 	}
