@@ -7,6 +7,7 @@ require (
 	github.com/coreos/go-iptables v0.8.0
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/go-set/v3 v3.0.1
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/hashicorp/nomad/api v0.0.0-20251205094914-d4aba5faf1a5
 	github.com/ryanuber/columnize v2.1.2+incompatible

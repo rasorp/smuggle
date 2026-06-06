@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
+	helperfile "github.com/rasorp/smuggle/internal/helper/file"
 	"github.com/rasorp/smuggle/internal/types"
 )
 
@@ -66,65 +66,29 @@ func (s *Store) Set(cfg *Config) error {
 		return errors.New("CNI config cannot be nil")
 	}
 
-	// Ensure the parent directory exists
-	if err := os.MkdirAll(s.path, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
+	// Guard against path traversal; cfg.Name must be a plain filename with no
+	// directory components.
+	if cfg.Name != filepath.Base(cfg.Name) {
+		return fmt.Errorf("invalid config name %q: path traversal detected", cfg.Name)
 	}
 
-	// Marshal the configuration to JSON
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal CNI config: %w", err)
 	}
 
-	// Create a temporary file in the same directory as the target file
-	// This ensures the temp file is on the same filesystem, which is required
-	// for atomic rename operations
-	tempFile, err := os.CreateTemp(s.path, ".cni-*.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	tempPath := tempFile.Name()
-
-	// Clean up the temp file if we fail before the rename
-	defer func() {
-		if tempFile != nil {
-			_ = tempFile.Close()
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	// Write the data to the temporary file
-	if _, err := tempFile.Write(data); err != nil {
-		return fmt.Errorf("failed to write to temporary file: %w", err)
-	}
-
-	// Sync to ensure data is written to disk
-	if err := tempFile.Sync(); err != nil {
-		return fmt.Errorf("failed to sync temporary file: %w", err)
-	}
-
-	// Close the temporary file before renaming
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temporary file: %w", err)
-	}
-	tempFile = nil // Prevent deferred cleanup from trying to close again
-
-	// Guard against path traversal; cfg.Name must be a plain filename with no
-	// directory components. The name is based on the network name which is
-	// validated on read, but we add this extra check here to be safe since
-	// we're using it as a filename.
-	if cfg.Name != filepath.Base(cfg.Name) {
-		return fmt.Errorf("invalid config name %q: path traversal detected", cfg.Name)
-	}
-
-	filename := filepath.Join(s.path, cfg.Name+".conf")
-
-	// Atomically rename the temporary file to the target path
-	// On Unix systems, this is atomic even if the target file exists
-	if err := os.Rename(tempPath, filename); err != nil {
-		return fmt.Errorf("failed to rename temporary file: %w", err)
+	if err := helperfile.AtomicWrite(filepath.Join(s.path, cfg.Name+".conf"), data, 0644); err != nil {
+		return fmt.Errorf("failed to write CNI config: %w", err)
 	}
 
 	return nil
+}
+
+// Delete removes the CNI configuration file for the named network. It is a
+// no-op if the file does not exist.
+func (s *Store) Delete(name string) error {
+	if name != filepath.Base(name) {
+		return fmt.Errorf("invalid config name %q: path traversal detected", name)
+	}
+	return helperfile.Delete(filepath.Join(s.path, name+".conf"))
 }

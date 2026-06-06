@@ -1,6 +1,7 @@
 package client
 
 import (
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -8,18 +9,28 @@ import (
 	"github.com/rasorp/smuggle/internal/types"
 )
 
+// startHeartbeaters starts a heartbeat goroutine for each subnet that is
+// currently configured.
 func (c *Client) startHeartbeaters() {
-	for _, subnet := range c.subnets {
-		go c.startSubnetHeartbeat(subnet)
+	for subnet := range c.subnets.Items() {
+		wg := c.networkWGFor(subnet.NetworkName)
+		wg.Add(1)
+		stopCh := c.newSubnetStopCh(subnet.NetworkName)
+		go c.startSubnetHeartbeat(subnet, stopCh, wg)
 	}
 }
 
-func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
+// startSubnetHeartbeat runs the heartbeat loop for a single subnet. It
+// refreshes the subnet's expiration at a fraction of the TTL to ensure it has
+// a safety margin before expiration.
+func (c *Client) startSubnetHeartbeat(subnet *types.Subnet, stopCh <-chan struct{}, wg *sync.WaitGroup) {
 	c.shutdownGroup.Add(1)
 	defer c.shutdownGroup.Done()
+	defer wg.Done()
 
-	// Calculate the heartbeat interval as half of the TTL to ensure we update
-	// before expiration. This provides a safety margin.
+	// Calculate the heartbeat interval as a third of the TTL to ensure we
+	// refresh well before expiration, providing a safety margin against
+	// transient failures.
 	heartbeatInterval := types.DefaultSubnetTTL / 3
 
 	ticker := time.NewTicker(heartbeatInterval)
@@ -70,6 +81,11 @@ func (c *Client) startSubnetHeartbeat(subnet *types.Subnet) {
 					append(logPairs, zap.Error(err))...,
 				)
 			}
+
+		case <-stopCh:
+			c.logger.Info("stopping subnet heartbeat", logPairs...)
+			return
+
 		case <-c.shutdownCh:
 			c.logger.Info("shutting down subnet heartbeat", logPairs...)
 			return

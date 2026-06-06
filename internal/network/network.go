@@ -66,6 +66,18 @@ func (m *Manager) SetLocal(
 	return provider.SetLocal(req)
 }
 
+func (m *Manager) DeleteLocal(
+	req *types.NetworkProviderDeleteLocalReq,
+) (*types.NetworkProviderDeleteLocalResp, error) {
+
+	provider, ok := m.providers[req.Subnet.Provider]
+	if !ok {
+		return nil, fmt.Errorf("unknown network provider %q", req.Subnet.Provider)
+	}
+
+	return provider.DeleteLocal(req)
+}
+
 func (m *Manager) DeleteRemote(
 	req *types.NetworkProviderDeleteRemoteReq,
 ) (*types.NetworkProviderDeleteRemoteResp, error) {

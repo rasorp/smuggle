@@ -455,6 +455,80 @@ func (i *Manager) EnsureIsolation(networks []*types.Network) error {
 	return nil
 }
 
+// deleteRule removes an iptables rule if it exists. It is the inverse of
+// applyRule and is idempotent.
+func (i *Manager) deleteRule(r rule) error {
+	exists, err := i.ipt.Exists(r.table, r.chain, r.spec...)
+	if err != nil {
+		return fmt.Errorf("failed to check if rule exists: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	loggingPairs := r.loggingPairs()
+	i.logger.Debug("deleting iptables rule", loggingPairs...)
+	if err := i.ipt.Delete(r.table, r.chain, r.spec...); err != nil {
+		return fmt.Errorf("failed to delete rule: %w", err)
+	}
+	i.logger.Info("successfully deleted iptables rule", loggingPairs...)
+	return nil
+}
+
+// TeardownForwardRules removes the per-network forwarding rules from the
+// SMUGGLE-FORWARD chain. The jump rule and the chain itself are left intact
+// because they are shared across all networks.
+func (i *Manager) TeardownForwardRules(network *types.Network) error {
+	cidr := network.IPv4.Network.String()
+	bridgeInterface := network.BridgeInterfaceName()
+	networkInterface := network.InterfaceName()
+
+	i.logger.Debug("tearing down forward rules",
+		zap.String("network_cidr", cidr),
+		zap.String("bridge_interface", bridgeInterface),
+		zap.String("network_interface", networkInterface),
+	)
+
+	for _, r := range i.forwardRules(cidr, bridgeInterface, networkInterface) {
+		// The jump rule in the FORWARD chain is shared by all networks; skip it.
+		if r.chain == forwardChainName {
+			continue
+		}
+		if err := i.deleteRule(r); err != nil {
+			return fmt.Errorf("failed to delete forward rule: %w", err)
+		}
+	}
+
+	i.logger.Info("successfully tore down forward rules",
+		zap.String("network_cidr", cidr),
+	)
+	return nil
+}
+
+// TeardownMasqRules removes the per-network masquerade rules from the
+// SMUGGLE-POSTROUTING chain. The chain itself and the jump from POSTROUTING
+// are shared; they are left intact.
+func (i *Manager) TeardownMasqRules(network *types.Network, subnet *types.Subnet) error {
+	ipv4Network := network.IPv4.Network
+	ipv4Subnet := subnet.IPv4Network
+
+	i.logger.Debug("tearing down masquerade rules",
+		zap.String("network_cidr", ipv4Network.String()),
+		zap.String("subnet_cidr", ipv4Subnet.String()),
+	)
+
+	for _, r := range i.masqRules(ipv4Network, ipv4Subnet) {
+		if err := i.deleteRule(r); err != nil {
+			return fmt.Errorf("failed to delete masq rule: %w", err)
+		}
+	}
+
+	i.logger.Info("successfully tore down masquerade rules",
+		zap.String("network_cidr", ipv4Network.String()),
+		zap.String("subnet_cidr", ipv4Subnet.String()),
+	)
+	return nil
+}
+
 // ensureIsolationRule ensures an isolation REJECT rule exists in the chain.
 // Unlike applyRule which appends, this inserts the rule at a specific position
 // to ensure isolation rules run before ACCEPT rules.

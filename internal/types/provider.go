@@ -19,6 +19,9 @@ type NetworkProvider interface {
 
 	// SetRemote configures routing to a remote subnet.
 	SetRemote(*NetworkProviderSetRemoteReq) (*NetworkProviderSetRemoteResp, error)
+
+	// DeleteLocal removes the local subnet interface that was set up by SetLocal.
+	DeleteLocal(*NetworkProviderDeleteLocalReq) (*NetworkProviderDeleteLocalResp, error)
 }
 
 // NetworkProviderSetReq contains parameters for setting up a local subnet.
@@ -49,3 +52,11 @@ type NetworkProviderSetRemoteReq struct {
 
 // NetworkProviderSetRemoteResp is returned after setting up a remote subnet.
 type NetworkProviderSetRemoteResp struct{}
+
+// NetworkProviderDeleteLocalReq contains parameters for deleting the local subnet interface.
+type NetworkProviderDeleteLocalReq struct {
+	Subnet *Subnet
+}
+
+// NetworkProviderDeleteLocalResp is returned after deleting the local subnet interface.
+type NetworkProviderDeleteLocalResp struct{}

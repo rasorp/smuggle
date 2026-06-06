@@ -45,8 +45,48 @@ func (s *Server) networkReaper() {
 		return
 	}
 
+	// Build the set of currently-known network names.
+	currentNames := make(map[string]struct{}, len(networks.Networks))
+	for _, network := range networks.Networks {
+		currentNames[network.Name] = struct{}{}
+	}
+
+	if s.knownNetworks == nil {
+		// First run: populate the baseline without expiring anything. This
+		// prevents a server restart from treating all existing networks as
+		// newly deleted.
+		s.knownNetworks = currentNames
+	} else {
+		// Subsequent runs: any name present in knownNetworks but absent from
+		// the current set corresponds to a deleted network whose subnets must
+		// be expired immediately.
+		for name := range s.knownNetworks {
+			if _, ok := currentNames[name]; !ok {
+				s.expireNetworkSubnets(name)
+			}
+		}
+		s.knownNetworks = currentNames
+	}
+
 	for _, network := range networks.Networks {
 		s.reapNetworkSubnets(network)
+	}
+}
+
+// expireNetworkSubnets immediately marks every subnet belonging to the named
+// network as expired. It is called when the reaper detects that a network has
+// been deleted from the store, so that watching clients receive expiry
+// notifications promptly rather than waiting for the natural TTL to elapse.
+func (s *Server) expireNetworkSubnets(networkName string) {
+	subnets := s.handlers.ListSubnets(networkName)
+
+	s.logger.Info("network deleted, expiring all subnets",
+		zap.String("network_name", networkName),
+		zap.Int("subnet_count", len(subnets)),
+	)
+
+	for _, subnet := range subnets {
+		s.handleSubnetExpiration(subnet)
 	}
 }
 

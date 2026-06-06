@@ -26,6 +26,7 @@ type Agent struct {
 	httpServer *http.Server
 	start      func() error
 	stop       func() error
+	sighup     func()
 }
 
 // AgentReq is the configuration used to construct a new Agent.
@@ -39,6 +40,10 @@ type AgentReq struct {
 
 	// Stop is called by Agent.Stop after the HTTP server has been shut down.
 	Stop func() error
+
+	// SIGHUP is an optional function called when the process receives SIGHUP.
+	// If nil, SIGHUP is silently ignored after logging.
+	SIGHUP func()
 }
 
 // New constructs an Agent from the provided AgentReq. If HTTP is enabled in
@@ -51,6 +56,7 @@ func New(req *AgentReq) (*Agent, error) {
 
 	a := &Agent{
 		logger: req.Logger.Named(log.ComponentNameAgent),
+		sighup: req.SIGHUP,
 		start:  req.Start,
 		stop:   req.Stop,
 	}
@@ -120,8 +126,8 @@ func (a *Agent) Stop() error {
 }
 
 // WaitForSignal blocks until SIGTERM, SIGINT, or SIGHUP is received. On SIGHUP
-// it logs that configuration reload is not yet implemented. On all other
-// signals it calls Stop and returns.
+// it calls the sighup hook if one was provided (e.g. to trigger a reconcile).
+// On all other signals it calls Stop and returns.
 func (a *Agent) WaitForSignal() {
 	signalCh := make(chan os.Signal, 3)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
@@ -134,7 +140,9 @@ func (a *Agent) WaitForSignal() {
 
 		switch sig {
 		case syscall.SIGHUP:
-			a.logger.Info("SIGHUP received, configuration reload not yet implemented")
+			if a.sighup != nil {
+				a.sighup()
+			}
 		default:
 			a.logger.Info("shutting down")
 			if err := a.Stop(); err != nil {

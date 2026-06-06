@@ -59,6 +59,13 @@ type Subnet struct {
 	ModifyIndex uint64 `json:"-"`
 }
 
+// Hash implements set.Hasher[string] so that *Subnet can be stored in a
+// set.HashSet keyed by NetworkName. Because each client holds at most one
+// subnet per network, NetworkName is a stable, unique key for this type.
+func (s *Subnet) Hash() string {
+	return s.NetworkName
+}
+
 // Copy creates a deep copy of the Subnet, so it can be modified without
 // affecting the original.
 func (s *Subnet) Copy() *Subnet {

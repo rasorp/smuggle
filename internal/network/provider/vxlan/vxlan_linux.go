@@ -448,6 +448,31 @@ func (p *Provider) SetRemote(
 	return &types.NetworkProviderSetRemoteResp{}, nil
 }
 
+func (p *Provider) DeleteLocal(
+	req *types.NetworkProviderDeleteLocalReq,
+) (*types.NetworkProviderDeleteLocalResp, error) {
+
+	name := req.Subnet.InterfaceName()
+
+	link, err := netlink.LinkByName(name)
+	if err != nil {
+		// Link may have already been removed; treat as a no-op so teardown is
+		// idempotent.
+		p.logger.Warn("VXLAN link not found during local teardown, skipping",
+			zap.String("name", name),
+			zap.Error(err),
+		)
+		return &types.NetworkProviderDeleteLocalResp{}, nil
+	}
+
+	if err := netlink.LinkDel(link); err != nil {
+		return nil, fmt.Errorf("failed to delete VXLAN interface %q: %w", name, err)
+	}
+
+	p.logger.Info("deleted local VXLAN interface", zap.String("name", name))
+	return &types.NetworkProviderDeleteLocalResp{}, nil
+}
+
 func (p *Provider) ensureLink(vxlan *netlink.Vxlan) (*netlink.Vxlan, error) {
 
 	// Try to create the VXLAN link and correctly handle the case where it

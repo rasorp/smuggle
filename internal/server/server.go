@@ -20,6 +20,12 @@ type Server struct {
 	store    smugglestore.BackingStore
 	handlers *rpc.Handlers
 
+	// knownNetworks is used by the network reaper to detect deleted networks
+	// across runs. It is populated on the first reaper run and updated on every
+	// subsequent run. Access is confined to the reaper goroutine, so no mutex is
+	// required.
+	knownNetworks map[string]struct{}
+
 	rpcServer *rpc.Server
 
 	// shutdownCh is used to signal to all server processes that the agent is

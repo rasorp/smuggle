@@ -2,32 +2,50 @@ package client
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/rasorp/smuggle/internal/types"
 )
 
+// startSubnetUpdateHandler starts one subnet-watcher goroutine per currently
+// configured network. It should only be called once during the client start;
+// all subsequent network additions are handled by the reconciler.
 func (c *Client) startSubnetUpdateHandler() error {
-
 	for _, network := range c.networks {
-		c.logger.Info("starting network subnet watcher", network.LoggingPairs()...)
-
-		req := &types.StoreWatchSubnetsReq{NetworkName: network.Name}
-
-		resp, err := c.server.WatchSubnets(context.Background(), req)
-		if err != nil {
+		wg := c.networkWGFor(network.Name)
+		if err := c.startNetworkWatcher(network, wg); err != nil {
 			return err
 		}
-
-		go c.subnetUpdateHandlerImpl(resp)
 	}
 	return nil
 }
 
-func (c *Client) subnetUpdateHandlerImpl(resp *types.StoreWatchSubnetsResp) {
+// startNetworkWatcher opens a watch stream for the given network's subnets and
+// launches a goroutine to process the events. The goroutine exits when either
+// the per-network stop channel (stored in c.watcherStopChs) or the global
+// shutdownCh is closed.
+func (c *Client) startNetworkWatcher(network *types.Network, wg *sync.WaitGroup) error {
+
+	c.logger.Info("starting network subnet watcher", network.LoggingPairs()...)
+
+	req := types.StoreWatchSubnetsReq{NetworkName: network.Name}
+
+	resp, err := c.server.WatchSubnets(context.Background(), &req)
+	if err != nil {
+		return err
+	}
+
+	wg.Add(1)
+	go c.subnetUpdateHandlerImpl(resp, c.newWatcherStopCh(network.Name), wg)
+	return nil
+}
+
+func (c *Client) subnetUpdateHandlerImpl(resp *types.StoreWatchSubnetsResp, stopCh <-chan struct{}, wg *sync.WaitGroup) {
 	c.shutdownGroup.Add(1)
 	defer c.shutdownGroup.Done()
+	defer wg.Done()
 
 	for {
 		select {
@@ -37,6 +55,9 @@ func (c *Client) subnetUpdateHandlerImpl(resp *types.StoreWatchSubnetsResp) {
 			c.handleSubnetSet(set)
 		case del := <-resp.DeleteCh:
 			c.handleSubnetDelete(del)
+		case <-stopCh:
+			c.logger.Info("stopping subnet update handler")
+			return
 		case <-c.shutdownCh:
 			c.logger.Info("shutting down subnet update handler")
 			return
@@ -63,7 +84,7 @@ func (c *Client) handleSubnetDelete(subnets []*types.Subnet) {
 
 		_, err := c.networkManager.DeleteRemote(&types.NetworkProviderDeleteRemoteReq{
 			Subnet:       subnet,
-			LocalSubnets: c.subnets,
+			LocalSubnets: c.localSubnets(),
 		})
 		if err != nil {
 			c.logger.Error("failed to delete remote network subnet",
@@ -93,7 +114,7 @@ func (c *Client) handleSubnetSet(subnets []*types.Subnet) {
 
 		_, err := c.networkManager.SetRemote(&types.NetworkProviderSetRemoteReq{
 			Subnet:       subnet,
-			LocalSubnets: c.subnets,
+			LocalSubnets: c.localSubnets(),
 		})
 		if err != nil {
 			c.logger.Error("failed to set up remote network subnet",

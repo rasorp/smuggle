@@ -20,4 +20,14 @@ type Firewall interface {
 	// network and subnet. This is used to enable NAT for traffic leaving the
 	// subnet to external destinations.
 	SetupMasqRules(*Network, *Subnet) error
+
+	// TeardownForwardRules removes firewall forwarding rules that were previously
+	// set up for the network. It is the inverse of SetupForwardRules and is called
+	// when a network is torn down.
+	TeardownForwardRules(*Network) error
+
+	// TeardownMasqRules removes firewall masquerading rules that were previously
+	// set up for the network and subnet. It is the inverse of SetupMasqRules and
+	// is called when a network is torn down.
+	TeardownMasqRules(*Network, *Subnet) error
 }

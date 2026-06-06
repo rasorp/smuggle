@@ -40,5 +40,6 @@ func NewClientAgent(cfg *config.ClientAgentConfig) (*Agent, error) {
 		HTTPConfig: cfg.HTTP,
 		Start:      cl.Start,
 		Stop:       cl.Stop,
+		SIGHUP:     cl.Reload,
 	})
 }
