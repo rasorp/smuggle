@@ -19,9 +19,10 @@ type Manager struct {
 	fingerprint *networkFingerprint
 	providers   map[string]types.NetworkProvider
 	Firewall    types.Firewall
+	dataDir     string
 }
 
-func NewManager(logger *zap.Logger, intf string) (*Manager, error) {
+func NewManager(logger *zap.Logger, intf, dataDir string) (*Manager, error) {
 
 	// Network manager is only supported on Linux. It would be possible to
 	// constrain this via build tags, but it would require duplicating a lot of
@@ -45,6 +46,7 @@ func NewManager(logger *zap.Logger, intf string) (*Manager, error) {
 		logger:      logger.Named(log.ComponentNameNetwork),
 		fingerprint: f,
 		Firewall:    firewallManager,
+		dataDir:     dataDir,
 	}
 
 	m.setProviderMap()

@@ -21,7 +21,7 @@ type Subnet struct {
 	NetworkName string `json:"network_name"`
 
 	// Provider is the name of the network provider used to create and manage
-	// this subnet. This currently only supports "vxlan".
+	// this subnet.
 	Provider string `json:"provider"`
 
 	// HostIPv4 is the IPv4 address of the host interface on which this subnet

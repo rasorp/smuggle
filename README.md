@@ -1,7 +1,8 @@
 # Smuggle
 Smuggle is a lightweight layer 3 overlay network fabric for
 [IBM HashiCorp Nomad](https://www.nomadproject.io/). It currently supports
-[VXLAN](https://en.wikipedia.org/wiki/Virtual_Extensible_LAN) overlays.
+[VXLAN](https://en.wikipedia.org/wiki/Virtual_Extensible_LAN) and
+[WireGuard](https://www.wireguard.com/) overlays.
 
 While other container networking solutions exist, most are focused on
 Kubernetes and are either incompatible with Nomad or require additional
