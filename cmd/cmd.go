@@ -37,7 +37,7 @@ func main() {
 		Description: strings.TrimSpace(
 			`
 Smuggle is a lightweight layer 3 overlay network fabric for IBM HashiCorp Nomad.
-It currently supports VXLAN overlays.
+It supports VXLAN and WireGuard overlays.
 
 While other container networking solutions exist, most are focused on Kubernetes
 and are either incompatible with Nomad or require additional services to be run
