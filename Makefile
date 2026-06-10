@@ -29,7 +29,7 @@ build: ## Build a development version of Smuggle
 	@echo "==> Building Smuggle..."
 	@go build \
 		-o ./bin/smuggle \
-		-trimpath \
+		-gcflags "all=-N -l" \
 		-ldflags "$(GO_LDFLAGS)" \
 		cmd/cmd.go
 	@echo "==> Done"
