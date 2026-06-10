@@ -152,6 +152,17 @@ func TestNetwork_Validate(t *testing.T) {
 			name:         "provider vxlan",
 			inputNetwork: validNetwork(),
 		},
+		{
+			name: "provider wireguard",
+			inputNetwork: &Network{
+				Name: "test",
+				IPv4: &IPv4Config{
+					Network: &IPv4Net{IP: 167772160, Size: 24},
+					Size:    24,
+				},
+				Provider: &ProviderConfig{Name: "wireguard"},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

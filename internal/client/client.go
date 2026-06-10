@@ -69,7 +69,7 @@ type ClientReq struct {
 
 func New(req *ClientReq) (*Client, error) {
 
-	netManager, err := network.NewManager(req.Logger, req.Config.NetworkInterface)
+	netManager, err := network.NewManager(req.Logger, req.Config.NetworkInterface, req.Config.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network manager: %w", err)
 	}
@@ -188,7 +188,8 @@ func (c *Client) Init() error {
 
 		c.logger.Info("initializing local host subnet", networkConfig.LoggingPairs()...)
 
-		if err := c.initSubnet(networkConfig, subnet); err != nil {
+		subnet, err = c.initSubnet(networkConfig, subnet)
+		if err != nil {
 			return fmt.Errorf("failed to initialize subnet: %w", err)
 		}
 
@@ -214,24 +215,24 @@ func (c *Client) Init() error {
 	return nil
 }
 
-func (c *Client) initSubnet(netCfg *types.Network, cfg *types.Subnet) error {
+func (c *Client) initSubnet(netCfg *types.Network, cfg *types.Subnet) (*types.Subnet, error) {
 
 	providerResp, err := c.networkManager.SetLocal(&types.NetworkProviderSetReq{Client: cfg})
 	if err != nil {
-		return fmt.Errorf("failed to set up local subnet: %w", err)
+		return nil, fmt.Errorf("failed to set up local subnet: %w", err)
 	}
 
 	if _, err := c.server.SetSubnet(&types.StoreSetSubnetReq{
 		Subnet: providerResp.Network,
 	}); err != nil {
-		return fmt.Errorf("failed to store client subnet: %w", err)
+		return nil, fmt.Errorf("failed to store client subnet: %w", err)
 	}
 
 	if err := c.cniStore.Set(cni.GenerateCNIConfig(netCfg, cfg)); err != nil {
-		return fmt.Errorf("failed to write CNI config: %w", err)
+		return nil, fmt.Errorf("failed to write CNI config: %w", err)
 	}
 
-	return nil
+	return providerResp.Network, nil
 }
 
 // generateID attempts to read the client ID from disk. If the file does not exist,

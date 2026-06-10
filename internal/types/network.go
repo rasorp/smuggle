@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"go.uber.org/zap"
 
@@ -88,10 +89,15 @@ func (n *Network) LoggingPairs() []zap.Field {
 	return f
 }
 
-// networkNameRe is the set of characters permitted in a network name. Names
-// must start with a lowercase letter and may only contain lowercase letters,
-// digits, hyphens, and underscores.
-var networkNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+var (
+	// networkNameRe is the set of characters permitted in a network name. Names
+	// must start with a lowercase letter and may only contain lowercase letters,
+	// digits, hyphens, and underscores.
+	networkNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+	// networkProviders is the set of supported network providers.
+	networkProviders = []string{"vxlan", "wireguard"}
+)
 
 // maxNetworkNameLen is the maximum number of characters allowed in a network
 // name. The binding constraint is BridgeInterfaceName(), which appends "brd0"
@@ -134,7 +140,7 @@ func (n *Network) Validate() error {
 	if n.Provider == nil {
 		return errors.New("network provider configuration is missing")
 	}
-	if n.Provider.Name != "vxlan" {
+	if !slices.Contains(networkProviders, n.Provider.Name) {
 		return fmt.Errorf("unsupported network provider: %q", n.Provider.Name)
 	}
 

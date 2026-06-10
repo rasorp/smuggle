@@ -2,11 +2,13 @@ package network
 
 import (
 	"github.com/rasorp/smuggle/internal/network/provider/vxlan"
+	"github.com/rasorp/smuggle/internal/network/provider/wireguard"
 	"github.com/rasorp/smuggle/internal/types"
 )
 
 func (m *Manager) setProviderMap() {
 	m.providers = map[string]types.NetworkProvider{
-		"vxlan": vxlan.New(m.logger),
+		"vxlan":                vxlan.New(m.logger),
+		wireguard.ProviderName: wireguard.New(m.logger, m.dataDir),
 	}
 }
