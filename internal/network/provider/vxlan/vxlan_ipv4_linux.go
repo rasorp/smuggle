@@ -11,7 +11,7 @@ import (
 
 func (p *Provider) createIPv4(
 	cfg *types.Subnet,
-	providerCfg *Config,
+	providerCfg *PeerConfig,
 	vtepDevIndex int,
 	hostIfaceName string,
 ) (*netlink.Vxlan, error) {
