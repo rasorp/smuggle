@@ -8,7 +8,7 @@ import (
 
 func (m *Manager) setProviderMap() {
 	m.providers = map[string]types.NetworkProvider{
-		"vxlan":                vxlan.New(m.logger),
+		vxlan.ProviderName:     vxlan.New(m.logger),
 		wireguard.ProviderName: wireguard.New(m.logger, m.dataDir),
 	}
 }

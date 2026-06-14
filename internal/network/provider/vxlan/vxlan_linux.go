@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	providerName = "vxlan"
+	ProviderName = "vxlan"
 
 	// defaultVNI is the default VXLAN Network Identifier used if none is
 	// specified by the operator.
@@ -47,29 +47,35 @@ type Provider struct {
 
 func New(logger *zap.Logger) types.NetworkProvider {
 	return &Provider{
-		logger: logger.Named(providerName),
+		logger: logger.Named(ProviderName),
 	}
 }
 
-func (p *Provider) Name() string { return providerName }
+func (p *Provider) Name() string { return ProviderName }
 
 func (p *Provider) SetLocal(
 	req *types.NetworkProviderSetReq,
 ) (*types.NetworkProviderSetResp, error) {
 
-	cfg := Config{
+	opCfg := OperatorConfig{
 		VNI:  defaultVNI,
 		Port: defaultPort,
-		MTU:  req.HostInterface.MTU - vxlanEncapuslationOverhead,
 	}
 
 	if req.Client.Config != nil {
-		if err := json.Unmarshal(req.Client.Config, &cfg); err != nil {
+		if err := json.Unmarshal(req.Client.Config, &opCfg); err != nil {
 			return nil, err
 		}
 	}
 
-	vxlanLink, err := p.createIPv4(req.Client, &cfg, req.HostInterface.Index, req.HostInterface.Name)
+	// Build the peer config combining operator settings with derived state.
+	peerCfg := &PeerConfig{
+		VNI:  opCfg.VNI,
+		Port: opCfg.Port,
+		MTU:  req.HostInterface.MTU - vxlanEncapuslationOverhead,
+	}
+
+	vxlanLink, err := p.createIPv4(req.Client, peerCfg, req.HostInterface.Index, req.HostInterface.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -81,17 +87,17 @@ func (p *Provider) SetLocal(
 	// that can result in the MAC address being incorrect immediately after
 	// creation. We may need to implement a retry here to ensure we get the
 	// correct address. https://github.com/vishvananda/netlink/issues/993
-	cfg.VtepMAC = vxlanLink.Attrs().HardwareAddr.String()
-	if cfg.VtepMAC == "" {
+	peerCfg.VtepMAC = vxlanLink.Attrs().HardwareAddr.String()
+	if peerCfg.VtepMAC == "" {
 		return nil, errors.New("VXLAN interface MAC address is empty")
 	}
 
-	marshaledCfg, err := json.Marshal(cfg)
+	marshaledCfg, err := json.Marshal(peerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal vxlan config: %v", err)
 	}
 
-	p.logger.Info("setup local VXLAN interface", cfg.loggingPairs()...)
+	p.logger.Info("setup local VXLAN interface", peerCfg.loggingPairs()...)
 
 	// Create a copy of the subnet to avoid mutating the request object and
 	// ensure we don't accidentally modify the caller's data.
@@ -105,12 +111,12 @@ func (p *Provider) DeleteRemote(
 	req *types.NetworkProviderDeleteRemoteReq,
 ) (*types.NetworkProviderDeleteRemoteResp, error) {
 
-	// Parse the provider config to get the VNI and VTEP MAC address.
-	var cfg Config
+	// Parse the provider peer config to get the VNI and VTEP MAC address.
+	var cfg PeerConfig
 
 	if req.Subnet.Config != nil {
 		if err := json.Unmarshal(req.Subnet.Config, &cfg); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal peer config: %w", err)
 		}
 	} else {
 		cfg.VNI = defaultVNI
@@ -279,14 +285,15 @@ func (p *Provider) SetRemote(
 	req *types.NetworkProviderSetRemoteReq,
 ) (*types.NetworkProviderSetRemoteResp, error) {
 
-	// Parse the provider config to get the VNI.
-	var cfg Config
+	// Parse the provider peer config to get the VNI and VTEP MAC.
+	var cfg PeerConfig
+
 	if req.Subnet.Config != nil {
 		if err := json.Unmarshal(req.Subnet.Config, &cfg); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal vxlan config: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal vxlan peer config: %w", err)
 		}
 	} else {
-		cfg.VNI = 1
+		cfg.VNI = defaultVNI
 	}
 
 	// Pull the VXLAN link by name, so we can add route, FDB and ARP entries to
