@@ -14,6 +14,7 @@ func initCommand() *cli.Command {
 		Name:     "init",
 		Category: "network",
 		Usage:    "Creates an example network configuration file",
+		Flags:    initFlags(),
 		Action: func(_ context.Context, cmd *cli.Command) error {
 
 			// Check if smuggle-net.json already exists. If it does, return an
@@ -27,10 +28,25 @@ func initCommand() *cli.Command {
 				return fmt.Errorf("%s already exists", networkInitFilename)
 			}
 
+			// Determine which example content to write based on the provider
+			// flag.
+			var content string
+
+			switch cmd.String("provider") {
+			case "vxlan":
+				content = vxlanNetworkInitContent
+			case "wireguard":
+				content = wireguardNetworkInitContent
+			default:
+				return fmt.Errorf("invalid provider: %q. Valid values are \"vxlan\" and \"wireguard\"",
+					cmd.String("provider"),
+				)
+			}
+
 			// Write out the example.
 			if err := os.WriteFile(
 				networkInitFilename,
-				[]byte(strings.TrimSpace(networkInitContent)),
+				[]byte(strings.TrimSpace(content)),
 				0600,
 			); err != nil {
 				return fmt.Errorf("failed to write file: %w", err)
@@ -47,11 +63,11 @@ const (
 	// which contains an example network configuration.
 	networkInitFilename = "smuggle-net.json"
 
-	// networkInitContent is the content of the example network configuration
-	// file created by the init command. This is a basic VXLAN network that can
-	// be modified and written to Nomad via:
+	// vxlanNetworkInitContent is the content of the example vxlan network
+	// configuration file created by the init command. This is a basic vxlan
+	// network that can be modified and written to Nomad via:
 	// nomad var put smuggle/networks/v1/vxlan data="$(cat smuggle-net.json)".
-	networkInitContent = `
+	vxlanNetworkInitContent = `
 {
   "name": "vxlan",
   "ipmasq": true,
@@ -68,4 +84,32 @@ const (
   }
 }
 `
+
+	// wireguardNetworkInitContent is the content of the example wireguard
+	// network configuration file created by the init command. This is a basic
+	// wireguard network that can be modified and written to Nomad via:
+	// nomad var put smuggle/networks/v1/wireguard data="$(cat smuggle-net.json)".
+	wireguardNetworkInitContent = `
+{
+ "name": "wireguard",
+ "ipmasq": true,
+ "ipv4": {
+   "network": "10.10.0.0/16",
+   "size": 24
+ },
+ "provider": {
+   "name": "wireguard"
+ }
+}
+`
 )
+
+func initFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:  "provider",
+			Usage: "The network provider to use for the example configuration",
+			Value: "vxlan",
+		},
+	}
+}
