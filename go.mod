@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/hashicorp/nomad/api v0.0.0-20251205094914-d4aba5faf1a5
 	github.com/ryanuber/columnize v2.1.2+incompatible
-	github.com/sethvargo/go-retry v0.3.0
+	github.com/sethvargo/go-retry v0.4.0
 	github.com/shoenig/test v1.13.2
 	github.com/urfave/cli/v3 v3.10.1
 	github.com/vishvananda/netlink v1.3.1
