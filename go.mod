@@ -12,7 +12,7 @@ require (
 	github.com/ryanuber/columnize v2.1.2+incompatible
 	github.com/sethvargo/go-retry v0.4.0
 	github.com/shoenig/test v1.13.2
-	github.com/urfave/cli/v3 v3.10.1
+	github.com/urfave/cli/v3 v3.11.0
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/time v0.15.0
