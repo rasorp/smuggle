@@ -1,6 +1,6 @@
 module github.com/rasorp/smuggle
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/containernetworking/plugins v1.9.1
@@ -15,7 +15,7 @@ require (
 	github.com/urfave/cli/v3 v3.11.0
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/zap v1.28.0
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.16.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	gopkg.in/lumberjack.v2 v2.0.0
 )
